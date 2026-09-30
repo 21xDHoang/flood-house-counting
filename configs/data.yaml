@@ -19,6 +19,16 @@ paths:
   # phương tiện trung gian, mất cũng không sao.
   work_dir: /content/floodnet_work
 
+  # --- Phase 2 ---
+  # Nơi DỰNG dataset đã xử lý. Cố ý để trên /content (đĩa cục bộ) chứ không để
+  # trên Drive: phải ghi 2343 ảnh JPEG + 2343 mask PNG, mà ghi Drive qua FUSE
+  # chậm hơn nhiều lần. Dựng xong mới nén thành 1 tệp zip rồi mới đẩy lên Drive.
+  processed_dir: /content/floodnet_coco
+
+  # Nơi ghi báo cáo Phase 2 + ảnh overlay GT (để trên Drive cho người dùng mở xem
+  # được, không cần giải nén).
+  build_output_dir: /content/drive/MyDrive/Flood_House_AI/runs/build
+
 # ---------------------------------------------------------------------------
 # Tiền xử lý — Phase 2 sẽ dùng đúng các giá trị này
 # ---------------------------------------------------------------------------
@@ -112,3 +122,33 @@ eda:
   max_images: null
   # Số ảnh lấy mẫu để kiểm chứng "nhà ngập nằm cạnh nước" (tốn thời gian hơn).
   num_water_check: 60
+
+# ---------------------------------------------------------------------------
+# Dựng dataset COCO (Phase 2)
+# ---------------------------------------------------------------------------
+build_coco:
+  # Chất lượng JPEG của ảnh đã resize. 95 là mức mà mắt thường không phân biệt
+  # được với ảnh gốc, mà dung lượng chỉ bằng ~1/8 so với PNG. Hạ xuống 85 thì
+  # tiết kiệm thêm ~40% nhưng bắt đầu làm mờ các cạnh mái nhà — mà cạnh mái lại
+  # chính là thứ model dùng để phân biệt nhà với đường.
+  jpeg_quality: 95
+
+  # Có lưu mask 10 lớp đã resize (PNG) vào dataset không.
+  # GIỮ LẠI vì mask nén rất tốt (vùng màu phẳng) nên tốn thêm không đáng kể, mà
+  # đổi lại vẫn làm lại được phép kiểm chứng "nhà ngập có chạm nước không" và mọi
+  # phân tích lỗi cần lớp nước ở Phase 6. Bỏ đi thì phải giải nén lại 13 GB.
+  # Đặt false nếu Drive sắp hết chỗ.
+  luu_mask: true
+
+  # Sai số cho phép khi đơn giản hoá polygon (pixel). Polygon chỉ để file COCO hợp
+  # lệ và để vẽ overlay kiểm tra — Cascade R-CNN bản này CHỈ dùng box, không dùng
+  # mask. Không đơn giản hoá thì một căn nhà thành polygon hàng nghìn điểm, file
+  # JSON phình vô ích. 1px là mức mắt thường không thấy khác.
+  eps_polygon: 1.0
+
+  # Số ảnh overlay GT vẽ ra để người dùng soi bằng mắt (bước kiểm cuối của GATE 2).
+  num_overlays: 30
+  seed: 42
+
+  # Chỉ xử lý N ảnh đầu mỗi split — dùng để chạy thử cho nhanh. null = chạy hết.
+  max_images: null

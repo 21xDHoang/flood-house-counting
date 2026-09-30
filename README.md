@@ -26,8 +26,8 @@ Số liệu và phát hiện đã kiểm chứng thật: [`docs/NOTES.md`](docs/
 | Phase | Nội dung | Trạng thái |
 |---|---|---|
 | 0 | Khởi tạo repo + kiểm tra môi trường Colab | ✅ **GATE 0 đạt** — chạy thật trên Colab T4, đã kiểm chứng đủ (`docs/NOTES.md` §1.5–§1.6) |
-| 1 | Khám phá dữ liệu (EDA) & quyết định tiền xử lý | 🔧 code + test xong, **chờ chạy trên Colab để chốt GATE 1** |
-| 2 | Chuyển mask → COCO & tiền xử lý offline | ⏳ |
+| 1 | Khám phá dữ liệu (EDA) & quyết định tiền xử lý | ✅ **GATE 1 đạt (30/09/2026)** — 4 tham số đã chốt (`docs/NOTES.md` §2.5) |
+| 2 | Chuyển mask → COCO & tiền xử lý offline | 🔧 code + test xong, **chờ chạy trên Colab để chốt GATE 2** |
 | 3 | Cấu hình model & sanity check (overfit 20 ảnh) | ⏳ |
 | 4 | Huấn luyện baseline (E1) | ⏳ |
 | 5 | Đánh giá mAP + sai số đếm & phân tích lỗi | ⏳ |
@@ -89,6 +89,31 @@ Kết quả nằm ở `MyDrive/Flood_House_AI/runs/eda/`: `EDA_REPORT.md` và th
 `overlay/` chứa ảnh có vẽ box (đỏ = nhà ngập, xanh = không ngập, **tím = box to
 bất thường, nghi bị gộp**).
 
+### Chạy Phase 2 (mask → COCO)
+
+Mở `notebooks/02_build_coco.ipynb` và chạy từ trên xuống. Cũng **không cần GPU**
+và **không cần cài MMDetection**.
+
+| Ô | Việc | Thời gian |
+|---|---|---|
+| `[2.5]` | Chạy thử **3 ảnh mỗi split** vào thư mục `_thu` riêng | ~30 giây |
+| `[2.6]` | Chạy **đầy đủ** | ~15–30 phút |
+| `[2.8]` | Nén `floodnet_coco.zip` (~1–2 GB) lên Drive | ~3–5 phút |
+
+**Chạy ô `[1.6]` của notebook 01 trước ô `[2.6]`, trong cùng một phiên.** Phase 2
+cần `audit.jsonl` còn nằm trong `/content` để làm phép đối chiếu quan trọng nhất
+của GATE 2: nó tính **lại** số box từ kết quả Phase 1 bằng **đúng bộ lọc của Phase
+2** rồi so với dataset vừa dựng. Khớp hoàn toàn nghĩa là hai phase dùng chung một
+định nghĩa "nhà hợp lệ" — nếu lệch thì **đừng train**, gửi kết quả lại.
+
+Kết quả ở `MyDrive/Flood_House_AI/runs/build/`: `BUILD_REPORT.md` (số ảnh/số box
+mỗi split, kết quả đối chiếu, cảnh báo) và `overlay_gt/` — ảnh vẽ box **lấy từ file
+COCO JSON** đè lên **ảnh JPEG đã ghi ra đĩa**, tức đúng thứ model sẽ đọc lúc train.
+
+Dataset dựng ra (`/content/floodnet_coco`) rồi nén thành **một tệp zip** trên Drive:
+4686 file ảnh/mask ghi thẳng lên Drive qua FUSE sẽ chậm hơn nhiều lần, mà Phase 3
+chỉ cần giải nén một tệp. Mất ~20 phút dựng lại nếu quên ô `[2.8]`.
+
 ---
 
 ## Cấu trúc repo
@@ -105,7 +130,7 @@ bất thường, nghi bị gộp**).
 | `src/floodcount/infer/` | `predict.py` (ảnh → box + số đếm), `tta_wbf.py` |
 | `scripts/` | Lệnh CLI mỏng gọi vào `src/` |
 | `notebooks/` | Notebook **mỏng** cho Colab — chỉ gọi script, không chứa logic |
-| `tests/` | Test chạy trên máy CPU, không cần GPU và không cần dataset thật (`test_audit.py`: 103 assertion trên zip giả có cả bẫy ColorMasks) |
+| `tests/` | Test chạy trên máy CPU, không cần GPU và không cần dataset thật — `test_audit.py`: 103 assertion, `test_mask_to_coco.py`: 106 assertion, đều chạy trên zip giả có cả bẫy ColorMasks |
 | `outputs/` | Ảnh minh hoạ, overlay, biểu đồ (không đưa lên git) |
 | `requirements-colab.txt` | Bản ghi các gói cài thêm vào Colab (đọc phần đầu file trước khi dùng) |
 

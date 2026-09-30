@@ -614,6 +614,53 @@ phân tích lỗi cho thấy nhà nhỏ là nguồn lỗi chính thì đó chín
 
 ---
 
+### 2.6 Phase 2 — mask → COCO: bốn quyết định và hai lỗi tự bắt được (30/09/2026)
+
+**Bốn quyết định kỹ thuật, ghi lại để trả lời khi bảo vệ:**
+
+| Quyết định | Lý do |
+|---|---|
+| **Giữ nguyên 10 lớp** trong mask đã resize (không chỉ 2 lớp nhà) | Mask PNG nén rất tốt (vùng màu phẳng) nên tốn thêm không đáng kể, mà đổi lại vẫn làm lại được phép kiểm chứng "nhà ngập có chạm nước không" ở Phase 6. Bỏ đi thì phải giải nén lại 13 GB |
+| `area` = **số pixel thật** của component, không phải diện tích đa giác | Đây mới là con số đã dùng để lọc nhiễu, và đúng về hình học cả khi hình có lỗ. COCO chỉ dùng `area` để phân loại small/medium/large nên không ảnh hưởng lúc train |
+| **Box sát mép ảnh vẫn giữ** | Nhà bị cắt ở rìa vẫn là nhà cần đếm; bỏ đi thì số nhà của đồ án ít hơn số nhà thật. Cái giá là box cụt một cạnh, nên số box sát mép được **đếm và in ra** trong báo cáo để sau này phân tích lỗi còn có số liệu mà bàn |
+| `id` ảnh COCO đánh theo **tên file đã sắp xếp**, không theo thứ tự xử lý | Chạy lại giữa chừng (resume) hay đổi thứ tự xử lý đều cho ra file giống hệt nhau — Phase 5 phải tái lập được |
+
+**Bộ lọc khác Phase 1 một chỗ, và đó là chỗ dễ tưởng nhầm là bug.** Cột `so_box_loc`
+trong `EDA_REPORT.md` chỉ lọc theo **cạnh**; Phase 2 lọc theo **cả cạnh VÀ diện tích**
+(`min(bw,bh) >= 8` và `area >= 64`). Hai bộ lọc chỉ khác nhau ở những hình thoi kiểu
+đường chéo 16×16px (bbox 16×16 nhưng chỉ có 16 pixel thật). Vì vậy `doi_chieu_voi_phase1()`
+**tính lại** từ `audit.jsonl` bằng đúng bộ lọc của Phase 2 rồi mới so — so thẳng với cột
+`so_box_loc` là so sai và sẽ tưởng nhầm là Phase 2 có bug. Test khoá lại cả hai hình nhiễu
+này: một vệt `100×1` (lọt ngưỡng diện tích, bị ngưỡng cạnh chặn) và một đường chéo `16×16`
+(lọt ngưỡng cạnh, bị ngưỡng diện tích chặn).
+
+**Hai lỗi tự bắt được, cùng một họ — "thất bại im lặng":**
+
+1. **Đọc `.jsonl` bằng sai khoá.** Phase 1 ghi khoá `anh`, Phase 2 ghi khoá `file_name`.
+   `doc_ket_qua_da_co()` cũ bắt `(json.JSONDecodeError, KeyError)` rồi `continue`, nên dùng
+   nhầm khoá thì **mọi** bản ghi đều ném `KeyError`, hàm trả về rỗng, và chế độ resume tắt
+   ngóm — chạy lại từ đầu mà không có lấy một dòng cảnh báo. Tệ hơn: dòng ráp COCO
+   (`ban_ghi = list(doc_ket_qua_da_co(duong_jsonl).values())`) đã **thực sự** thiếu
+   `khoa="file_name"`, nghĩa là Phase 2 sẽ ghi ra dataset **0 ảnh** rồi in "XONG", mã thoát 0.
+   Sửa: tách `KeyError` ra khỏi `except`, ném lỗi kèm thông báo chỉ rõ hai khoá của hai phase;
+   và thêm chốt chặn — không có bản ghi nào thì thoát mã 1, in lý do từng cặp bị bỏ.
+2. **`min_area` chỉ lọc được một nửa số ca nhiễu.** Lọc chỉ theo diện tích thì vệt rác
+   `1×500px` lọt qua (diện tích 500 > 64); lọc chỉ theo cạnh thì đường chéo `8×8px` lọt qua
+   (bbox 8×8 nhưng chỉ 8 pixel thật). Phải áp dụng **cả hai** thì "một căn nhà hợp lệ" mới chỉ
+   có một định nghĩa trong toàn pipeline — đây là lý do `min_area = min_side_px²` trong config.
+
+**`notebooks/02_build_coco.ipynb` không cần GPU và không cần MMDetection.** Dataset dựng trên
+`/content` rồi mới nén thành **một tệp zip** đẩy lên Drive: 4686 file ảnh/mask ghi thẳng lên
+Drive qua FUSE chậm hơn nhiều lần, mà Phase 3 chỉ cần giải nén một tệp. Nén bằng `ZIP_STORED`
+(không nén lại): JPEG và PNG vốn đã nén sẵn, thử nén thêm chỉ thu ~0% mà tốn vài phút CPU.
+
+**Test:** `tests/test_mask_to_coco.py`, 106 assertion trên zip giả — khoá lại tiền tố split
+trong tên file (cả ba split đều đặt tên `1.jpg`, thiếu tiền tố là ghi đè nhau mất ảnh), hai
+loại nhiễu, hai nhà kề nhau ra đúng 1 box, counts CSV khớp COCO JSON, phép đối chiếu Phase 1,
+resume không nhân đôi, ảnh/mask lệch kích thước, và `tao_categories` từ chối id không liên tục.
+
+---
+
 ## 3. Việc tiếp theo
 
 1. ~~Chạy `notebooks/00_colab_setup.ipynb` trên Colab (GPU T4) → chốt GATE 0.~~
@@ -632,5 +679,21 @@ phân tích lỗi cho thấy nhà nhỏ là nguồn lỗi chính thì đó chín
    Chạy lại [1.6] bây giờ rất nhanh (~2 phút) vì nó đọc lại `audit.jsonl` cũ thay vì
    xử lý lại 2343 ảnh — dùng mỗi khi chỉ cần đổi phần báo cáo.
 
-4. **Phase 2 (tiếp theo)** — chuyển mask → COCO cho hai lớp nhà, dùng đúng
-   `target_long_side: 1536`, `min_area: 64`, không cắt tile, không watershed.
+4. **Phase 2 — code + test XONG (30/09/2026), chờ chạy trên Colab để chốt GATE 2.**
+   Chi tiết quyết định và hai lỗi tự bắt được ở §2.6. Đã thêm:
+   - `src/floodcount/data/resize.py` — module resize dùng chung cho cả hai phase, để
+     không có chuyện Phase 1 và Phase 2 resize lệch nhau (ảnh `INTER_AREA`,
+     mask **luôn** `INTER_NEAREST`)
+   - `src/floodcount/data/mask_to_coco.py` + `scripts/build_coco.py`
+   - `tests/test_mask_to_coco.py` — 106 assertion
+   - `notebooks/02_build_coco.ipynb`
+   - `build_coco:` trong `configs/data.yaml` (chất lượng JPEG, có lưu mask không, eps polygon)
+
+   **Phép kiểm quan trọng nhất của GATE 2:** chạy ô `[1.6]` của notebook 01 **trong cùng
+   phiên** trước ô `[2.6]`, để Phase 2 đối chiếu được với `audit.jsonl`. Khớp hoàn toàn
+   nghĩa là hai phase dùng chung một định nghĩa "nhà hợp lệ". Lệch thì **đừng train**.
+
+   **GATE 2 cần người dùng xác nhận:** `BUILD_REPORT.md` (số ảnh/số box mỗi split) và
+   ảnh trong `overlay_gt/` — box đỏ/xanh có khớp nhà không, số ở góc ảnh có đúng bằng số
+   box nhìn thấy không, có nhà nào bị bỏ sót không. Overlay lần này vẽ từ **file COCO JSON**
+   đè lên **ảnh JPEG đã ghi ra đĩa**, tức đúng thứ model sẽ đọc lúc train.

@@ -50,6 +50,12 @@ import cv2
 import numpy as np
 import yaml
 
+# Công thức resize dùng CHUNG với Phase 2 (mask_to_coco.py). Để hai nơi tự tính
+# riêng thì chỉ cần một bên đổi cách làm tròn là số box của Phase 2 lệch khỏi con
+# số Phase 1 đã đo — mà lệch kiểu đó thì cả hai bên nhìn đều "đúng".
+from floodcount.data.resize import (kich_thuoc_sau_resize,  # noqa: E402
+                                    resize_anh, resize_mask)
+
 # Chỉ coi là ảnh khi có đuôi quen thuộc — tránh đọc nhầm file lạ trong zip
 DUOI_ANH = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp")
 
@@ -214,8 +220,18 @@ def ghep_cap_anh_mask(thong_tin, ds_ten):
 # Ghi/đọc file trung gian — chạy dở mà Colab ngắt thì không mất hết
 # ===========================================================================
 
-def doc_ket_qua_da_co(duong_dan):
-    """Đọc lại .jsonl của lần chạy trước -> {tên_ảnh: bản_ghi} để bỏ qua ảnh đã làm."""
+def doc_ket_qua_da_co(duong_dan, khoa="anh"):
+    """Đọc lại .jsonl của lần chạy trước -> {khoá: bản_ghi} để bỏ qua ảnh đã làm.
+
+    `khoa` là tên trường dùng làm khoá, KHÁC NHAU giữa hai phase: Phase 1
+    (`audit.py`) đánh khoá theo đường dẫn ảnh trong zip (`anh`), Phase 2
+    (`mask_to_coco.py`) theo tên file trong dataset đã dựng (`file_name`).
+
+    Chỗ này rất dễ sai và sai thì im lặng: dùng nhầm khoá thì MỌI bản ghi đều
+    ném KeyError, hàm trả về rỗng, và chế độ chạy tiếp (resume) tắt ngóm — chạy
+    lại từ đầu mà không có lấy một dòng cảnh báo. Vì vậy `mask_to_coco.py` có
+    test riêng khoá đúng hành vi này (`tests/test_mask_to_coco.py` mục 8).
+    """
     da_co = {}
     if not os.path.exists(duong_dan):
         return da_co
@@ -226,10 +242,21 @@ def doc_ket_qua_da_co(duong_dan):
                 continue
             try:
                 r = json.loads(dong)
-                da_co[r["anh"]] = r
-            except (json.JSONDecodeError, KeyError):
+            except json.JSONDecodeError:
                 # Dòng cuối bị cắt cụt do crash giữa chừng -> bỏ qua dòng đó
                 continue
+            # Khoá thiếu thì NÉM LỖI, không bỏ qua. Bỏ qua là đúng thứ đã suýt làm
+            # Phase 2 ghi ra dataset 0 ảnh mà vẫn báo "XONG": dùng nhầm khoá thì
+            # MỌI bản ghi đều thiếu khoá, hàm trả về rỗng, và không có lấy một
+            # dòng cảnh báo. Lỗi lập trình thì phải kêu to.
+            if khoa not in r:
+                raise KeyError(
+                    f"`{duong_dan}` có bản ghi không chứa trường `{khoa}`.\n"
+                    f"    Nhiều khả năng đang đọc bằng SAI KHOÁ: Phase 1 "
+                    f"(audit.py) ghi khoá `anh`, Phase 2 (mask_to_coco.py) ghi "
+                    f"khoá `file_name`.\n"
+                    f"    Bản ghi gặp lỗi có các trường: {sorted(r)}")
+            da_co[r[khoa]] = r
     return da_co
 
 
@@ -260,8 +287,8 @@ def xu_ly_mot_anh(zf, ten_anh, ten_mask, classes, water_value,
     # --- Resize mask về kích thước dự kiến. Nhãn là số nguyên nên BẮT BUỘC
     #     INTER_NEAREST: nội suy tuyến tính sẽ tạo ra giá trị lớp không tồn tại. ---
     ty_le = target_long_side / max(h, w)
-    h2, w2 = int(round(h * ty_le)), int(round(w * ty_le))
-    mask_nho = cv2.resize(mask, (w2, h2), interpolation=cv2.INTER_NEAREST)
+    h2, w2 = kich_thuoc_sau_resize(h, w, target_long_side)
+    mask_nho = resize_mask(mask, (h2, w2))
 
     ban_ghi = {
         "anh": ten_anh,
@@ -363,7 +390,7 @@ def ve_overlay(zf, ten_anh, ban_ghi, thu_muc_ra, nguong_to_bat_thuong,
 
     # Resize ảnh về đúng hệ toạ độ của mask đã resize, để box vẽ khớp vị trí
     h2, w2 = ban_ghi["kich_thuoc_resize"]
-    anh = cv2.resize(anh, (w2, h2), interpolation=cv2.INTER_AREA)
+    anh = resize_anh(anh, (h2, w2))
 
     trung_vi = trung_vi_dien_tich or 0.0
 
