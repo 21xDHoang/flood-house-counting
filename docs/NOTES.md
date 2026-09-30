@@ -659,6 +659,97 @@ trong tên file (cả ba split đều đặt tên `1.jpg`, thiếu tiền tố l
 loại nhiễu, hai nhà kề nhau ra đúng 1 box, counts CSV khớp COCO JSON, phép đối chiếu Phase 1,
 resume không nhân đôi, ảnh/mask lệch kích thước, và `tao_categories` từ chối id không liên tục.
 
+### 2.7 Phase 2 chạy thật trên Colab — GATE 2 ĐẠT (30/09/2026)
+
+Chạy đủ 2.343 ảnh, mã thoát 0. Báo cáo ở `MyDrive/Flood_House_AI/runs/build/BUILD_REPORT.md`.
+
+| Split | Số ảnh | Box nhà ngập | Box nhà không ngập | Tổng box | Ảnh có nhà ngập |
+|---|---|---|---|---|---|
+| test | 448 | 604 | 651 | 1.255 | 47 |
+| train | 1.445 | 1.841 | 1.938 | 3.779 | 149 |
+| val | 450 | 643 | 624 | 1.267 | 49 |
+| **Tổng** | **2.343** | **3.088** | **3.213** | **6.301** | **245** |
+
+**Phép kiểm quan trọng nhất — ĐẠT.** Đối chiếu với Phase 1 ra **+0 ở cả hai lớp**
+(3.088 và 3.213). Nghĩa là hai phase dùng chung đúng một định nghĩa "nhà hợp lệ", và
+mọi so sánh số liệu giữa hai phase từ đây về sau mới có nghĩa.
+
+Ba con số khác khớp với Phase 1, không phải chỉnh gì:
+
+- **2.343 ảnh**, đúng 1.445/450/448 — bằng số cặp ảnh/mask Phase 1 ghép được.
+- **245 ảnh có nhà ngập** — Phase 1 đếm bằng bộ lọc **cạnh**, Phase 2 bằng bộ lọc
+  **cạnh + diện tích**, mà vẫn ra đúng 245. Tức bộ lọc diện tích không làm mất căn
+  nhà cuối cùng của ảnh nào.
+- **`pycocotools` đọc được cả 3 file** (448/1.255, 1.445/3.779, 450/1.267 annotation)
+  và kiểm tra cấu trúc COCO ĐẠT: mọi `image_id` tồn tại, mọi `bbox` nằm trong ảnh và
+  có kích thước dương, `id` không trùng.
+
+**41 box bị loại thêm so với Phase 1 — bằng chứng bộ lọc hai điều kiện có tác dụng.**
+Phase 1 (chỉ lọc cạnh) đếm 3.101 + 3.241 = **6.342** box; Phase 2 (lọc cả cạnh và diện
+tích) còn 3.088 + 3.213 = **6.301** box. Chênh 13 + 28 = 41 box (0,65%) — đúng là các
+hình thoi/đường chéo có bbox đủ to nhưng số pixel thật quá ít, tức đúng loại nhiễu mà
+bộ lọc diện tích sinh ra để chặn. **Nếu chênh bằng 0 thì mới đáng lo**, vì như vậy bộ
+lọc diện tích chẳng chặn được gì và rất có thể đang bị vô hiệu.
+
+#### Phát hiện quan trọng: nhà RẤT TO, và gần một nửa số box bị cắt ở mép ảnh
+
+Người dùng soi 90 ảnh overlay xác nhận box đỏ/xanh **khớp nhà** và **không có box nào
+ôm nhiều căn nhà**. Nhưng câu hỏi "box bị cắt ở rìa có nhiều không" thì mắt trả lời
+"không nhiều", trong khi báo cáo ghi **2.953/6.301 box = 46,9% chạm mép**. Đã phân xử
+bằng số liệu, và **46,9% là ĐÚNG**:
+
+- Đo lại trên `build.jsonl`: 803 chạm mép trái, 969 mép trên, 793 mép phải, 831 mép
+  dưới. **Bốn cạnh gần bằng nhau** — nếu `w2`/`h2` bị hoán vị (lỗi hay gặp nhất ở loại
+  kiểm tra này) thì một cạnh sẽ vọt lên còn một cạnh về 0. Phân bố đều là dấu hiệu của
+  hiện tượng hình học thật, không phải lỗi đếm.
+- Mô hình hình học: nhà phân bố trên mặt đất, ảnh là một cửa sổ cắt ra, nên nhà bị cắt
+  ở mép **được đếm nhiều hơn** tỉ lệ diện tích. Với cửa sổ dài `L` và bề rộng nhà `b`,
+  xác suất một nhà chạm một mép là `2b/(L+b)`: ngang `2×203,8/(1536+203,8) = 0,234`;
+  dọc `2×193,7/(1152+193,7) = 0,288`; gộp `1 − 0,766×0,712 = 0,455`.
+  **Mô hình đoán 45,5%, thực đo 46,9%.**
+- Vì sao mắt lại nói "không nhiều": box bị cắt ở rìa **trông không có gì sai** — nó chỉ
+  là một box nằm sát khung. Mắt bắt cái bất thường, mà cái này thì bình thường.
+
+**Kích thước box thật** (đo trên `build.jsonl`, cả 6.301 box):
+
+| | trung vị | trung bình | p90 |
+|---|---|---|---|
+| chiều rộng `bw` | 186 | 203,8 | 348 |
+| chiều cao `bh` | 180 | 193,7 | 336 |
+
+Hai hệ quả phải nhớ:
+
+1. **Phase 3 — dải anchor của RPN.** Nhà có cạnh trung vị **186px**, lớn hơn nhiều so
+   với mức mà bộ anchor mặc định của COCO nhắm tới. Phải kiểm dải anchor phủ tới
+   ~350–500px, đừng để mặc định rồi ngồi đoán vì sao recall thấp.
+2. **Phase 6 — cắt tile có thêm một lập luận độc lập.** GATE 1 hoãn quyết định tiling
+   vì `p5 = 28px` chỉ sát dưới ngưỡng 32px. Con số 46,9% này là lập luận thứ hai và
+   mạnh hơn: **gần một nửa số box bị cụt một cạnh**, mà box cụt thì khó học hơn box
+   nguyên. Một nửa số box là quá nhiều để đổ cho nhiễu.
+
+Ảnh sau resize có **hai cỡ**: `1536×1152` (1.991 ảnh) và `1536×1028` (352 ảnh) — cùng
+chiều ngang 1536, chiều dọc lệch 11%. Đây chính là lý do phải bật augmentation đổi tỉ
+lệ ở Phase 3 (đã ghi ở §2.4).
+
+#### Bài học vận hành: ngắt giữa chừng và tiến trình mồ côi
+
+Lần chạy đầu bị ngắt ở ảnh 600/2.343 (`KeyboardInterrupt`). **Không mất gì**: mỗi ảnh
+ghi xong là `flush()` ngay một dòng vào `build.jsonl`, và lúc khởi động lại bản ghi chỉ
+được tin khi **ảnh còn thật trên đĩa** — nên chạy lại chỉ bỏ qua 640 ảnh đã xong (đọc
+lại đúng 640 bản ghi) rồi làm tiếp từ 641.
+
+Nhưng có một cái bẫy: khi ô notebook bị ngắt, **tiến trình con không chết theo**. Nó
+vẫn chạy và ghi vào ống dẫn mà không ai đọc → ống đầy (64 KB) → nó kẹt luôn. Chạy lại ô
+đó ngay lúc ấy là **hai tiến trình cùng ghi vào một thư mục**. Trước khi chạy lại phải
+dọn: `pkill -f build_coco.py` rồi kiểm lại bằng `ps`.
+
+#### Tệp dataset đã đóng gói
+
+`MyDrive/Flood_House_AI/processed/floodnet_coco.zip` — **4.692 tệp, 1,86 GB** (2.343 ảnh
++ 2.343 mask + 3 JSON annotation + 3 CSV counts), nén `ZIP_STORED` (JPEG/PNG vốn đã nén
+sẵn). Từ Phase 3 chỉ cần giải nén tệp này vào `/content`, **không cần tới
+`floodnet_raw.zip` 13 GB** nữa.
+
 ---
 
 ## 3. Việc tiếp theo
@@ -679,8 +770,9 @@ resume không nhân đôi, ảnh/mask lệch kích thước, và `tao_categories
    Chạy lại [1.6] bây giờ rất nhanh (~2 phút) vì nó đọc lại `audit.jsonl` cũ thay vì
    xử lý lại 2343 ảnh — dùng mỗi khi chỉ cần đổi phần báo cáo.
 
-4. **Phase 2 — code + test XONG (30/09/2026), chờ chạy trên Colab để chốt GATE 2.**
-   Chi tiết quyết định và hai lỗi tự bắt được ở §2.6. Đã thêm:
+4. **Phase 2 — XONG, GATE 2 ĐÃ CHỐT (30/09/2026).** Số liệu chạy thật, phép đối chiếu và
+   phát hiện về kích thước nhà ở §2.7; quyết định thiết kế và hai lỗi tự bắt được ở §2.6.
+   Đã thêm:
    - `src/floodcount/data/resize.py` — module resize dùng chung cho cả hai phase, để
      không có chuyện Phase 1 và Phase 2 resize lệch nhau (ảnh `INTER_AREA`,
      mask **luôn** `INTER_NEAREST`)
@@ -689,11 +781,19 @@ resume không nhân đôi, ảnh/mask lệch kích thước, và `tao_categories
    - `notebooks/02_build_coco.ipynb`
    - `build_coco:` trong `configs/data.yaml` (chất lượng JPEG, có lưu mask không, eps polygon)
 
-   **Phép kiểm quan trọng nhất của GATE 2:** chạy ô `[1.6]` của notebook 01 **trong cùng
-   phiên** trước ô `[2.6]`, để Phase 2 đối chiếu được với `audit.jsonl`. Khớp hoàn toàn
-   nghĩa là hai phase dùng chung một định nghĩa "nhà hợp lệ". Lệch thì **đừng train**.
+   **Phép kiểm quan trọng nhất của GATE 2 — ĐÃ CHẠY VÀ ĐẠT:** chạy ô `[1.6]` của notebook 01
+   **trong cùng phiên** trước ô `[2.6]`, để Phase 2 đối chiếu được với `audit.jsonl`. Kết quả
+   `+0` ở cả hai lớp. Người dùng cũng đã soi 90 ảnh `overlay_gt/` và xác nhận box khớp nhà,
+   không có box nào ôm nhiều căn.
 
-   **GATE 2 cần người dùng xác nhận:** `BUILD_REPORT.md` (số ảnh/số box mỗi split) và
-   ảnh trong `overlay_gt/` — box đỏ/xanh có khớp nhà không, số ở góc ảnh có đúng bằng số
-   box nhìn thấy không, có nhà nào bị bỏ sót không. Overlay lần này vẽ từ **file COCO JSON**
-   đè lên **ảnh JPEG đã ghi ra đĩa**, tức đúng thứ model sẽ đọc lúc train.
+   Dataset đã dựng và đóng gói: **`MyDrive/Flood_House_AI/processed/floodnet_coco.zip`**
+   (1,86 GB). `audit.jsonl` và `build.jsonl` cũng đã sao lưu lên `MyDrive/Flood_House_AI/state/`
+   nên phiên Colab sau không phải dựng lại gì.
+
+5. **Phase 3 — CẤU HÌNH MODEL & SANITY CHECK (chưa bắt đầu).** Đang chờ người dùng xác nhận
+   chốt GATE 2 rồi mới sang. Bốn việc đã biết trước:
+   - Giải nén `floodnet_coco.zip` vào `/content` — **không cần `floodnet_raw.zip` nữa**.
+   - **Kiểm dải anchor của RPN phủ tới ~350–500px**: nhà có cạnh trung vị 186px (§2.7), lớn
+     hơn nhiều so với mức anchor mặc định của COCO nhắm tới.
+   - Bật augmentation đổi tỉ lệ, vì dataset có hai cỡ ảnh lệch nhau 11% chiều dọc.
+   - Overfit 20 ảnh để chứng minh pipeline học được, trước khi train thật.

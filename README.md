@@ -27,7 +27,7 @@ Số liệu và phát hiện đã kiểm chứng thật: [`docs/NOTES.md`](docs/
 |---|---|---|
 | 0 | Khởi tạo repo + kiểm tra môi trường Colab | ✅ **GATE 0 đạt** — chạy thật trên Colab T4, đã kiểm chứng đủ (`docs/NOTES.md` §1.5–§1.6) |
 | 1 | Khám phá dữ liệu (EDA) & quyết định tiền xử lý | ✅ **GATE 1 đạt (30/09/2026)** — 4 tham số đã chốt (`docs/NOTES.md` §2.5) |
-| 2 | Chuyển mask → COCO & tiền xử lý offline | 🔧 code + test xong, **chờ chạy trên Colab để chốt GATE 2** |
+| 2 | Chuyển mask → COCO & tiền xử lý offline | ✅ **GATE 2 đạt (30/09/2026)** — 2.343 ảnh, 6.301 box, đối chiếu Phase 1 khớp hoàn toàn (`docs/NOTES.md` §2.7) |
 | 3 | Cấu hình model & sanity check (overfit 20 ảnh) | ⏳ |
 | 4 | Huấn luyện baseline (E1) | ⏳ |
 | 5 | Đánh giá mAP + sai số đếm & phân tích lỗi | ⏳ |
@@ -113,6 +113,24 @@ COCO JSON** đè lên **ảnh JPEG đã ghi ra đĩa**, tức đúng thứ model
 Dataset dựng ra (`/content/floodnet_coco`) rồi nén thành **một tệp zip** trên Drive:
 4686 file ảnh/mask ghi thẳng lên Drive qua FUSE sẽ chậm hơn nhiều lần, mà Phase 3
 chỉ cần giải nén một tệp. Mất ~20 phút dựng lại nếu quên ô `[2.8]`.
+
+**Kết quả Phase 2 (đã chốt GATE 2 ngày 30/09/2026):**
+
+| Split | Số ảnh | Box nhà ngập | Box nhà không ngập | Ảnh có nhà ngập |
+|---|---|---|---|---|
+| test | 448 | 604 | 651 | 47 |
+| train | 1.445 | 1.841 | 1.938 | 149 |
+| val | 450 | 643 | 624 | 49 |
+| **Tổng** | **2.343** | **3.088** | **3.213** | **245** |
+
+Phép đối chiếu với Phase 1 ra **+0 ở cả hai lớp** (`docs/NOTES.md` §2.7) — hai phase
+dùng chung một định nghĩa "nhà hợp lệ". Dataset đóng gói sẵn ở
+`MyDrive/Flood_House_AI/processed/floodnet_coco.zip` (1,86 GB), **từ Phase 3 không cần
+tới `floodnet_raw.zip` 13 GB nữa**.
+
+Hai con số đo được ở Phase 2 mà Phase 3–6 phải dùng tới: box có cạnh **trung vị 186px**
+(ảnh chỉ rộng 1536px), và **46,9% số box bị cắt ở mép ảnh** — xem §2.7 để biết vì sao
+con số thứ hai là thật chứ không phải lỗi đếm.
 
 ---
 
