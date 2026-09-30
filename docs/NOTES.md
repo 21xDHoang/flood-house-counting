@@ -195,6 +195,29 @@ Lỗi gặp ở lượt chạy đầu tiên (runtime **CPU-only**, trước khi 
 `FileNotFoundError` và **làm sập cả ô**, che mất phần in đĩa và RAM phía sau.
 → Ô [0.4] đã thêm hàm `lenh()` bắt lỗi này.
 
+### 1.6 `/content` mất sạch khi runtime reset — gặp thật ngày 30/09/2026
+
+Diễn biến đo được:
+
+1. `git clone` repo về `/content/flood-house-counting` → **thành công**
+   (23 object, 35,52 KiB, log đầy đủ).
+2. Ngay sau đó, `!cd /content/flood-house-counting` → `No such file or directory`.
+3. `!ls /content` → chỉ còn `sample_data`.
+
+Nguyên nhân: runtime Colab đã **khởi động lại** giữa hai lệnh. `/content` là **đĩa
+tạm**, bị xoá sạch mỗi lần runtime reset — kể cả khi người dùng đổi
+`Runtime → Change runtime type` (ví dụ bật T4 GPU). Không phải lỗi của repo, không
+phải lỗi của `.gitignore`; clone đã thành công thật rồi mới bị xoá.
+
+Hệ quả bắt buộc cho **mọi phase sau**:
+
+- Đầu **mỗi phiên** Colab phải `git clone` lại repo (~3 giây). Đây là việc bình
+  thường phải làm, không phải sự cố.
+- **Không bao giờ để kết quả chỉ nằm ở `/content`** — hết phiên là mất trắng.
+- Checkpoint, log, kết quả đánh giá **phải ghi ra Drive** (`MyDrive/Flood_House_AI/runs/`),
+  vì đó là chỗ duy nhất còn dữ liệu sau khi runtime reset. Đây chính là lý do kỹ
+  thuật để trả lời khi bảo vệ.
+
 ---
 
 ## 2. Dataset FloodNet
@@ -231,6 +254,10 @@ Các số dưới đây chỉ là **kỳ vọng** để đối chiếu, chưa ph
 
 ## 3. Việc tiếp theo
 
-1. Chạy `notebooks/00_colab_setup.ipynb` trên Colab (GPU T4), gửi lại khối
-   "BÁO CÁO GATE 0" → chốt GATE 0.
-2. Sau GATE 0: viết `src/floodcount/data/audit.py` cho Phase 1 (EDA).
+1. ~~Chạy `notebooks/00_colab_setup.ipynb` trên Colab (GPU T4) → chốt GATE 0.~~
+   **Xong 30/09/2026** — xem §1.5 và §1.6.
+2. Repo đã đẩy lên GitHub: **https://github.com/21xDHoang/flood-house-counting**
+   (public, nhánh `main`). Colab clone repo này về `/content` ở đầu mỗi phiên.
+3. **Phase 1 (đang làm)**: viết `src/floodcount/data/audit.py` — khảo sát mask thật,
+   trả lời checklist §2.2, đo phân bố kích thước nhà bằng connected components để
+   **chốt bằng số liệu** xem có phải cắt tile hay không.
