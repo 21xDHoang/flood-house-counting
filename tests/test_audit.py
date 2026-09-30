@@ -84,19 +84,26 @@ def tao_zip_gia(duong_dan_zip):
     anh_mau = np.full((H, W, 3), 180, np.uint8)   # ảnh xám nhạt, đủ để giải mã
 
     with zipfile.ZipFile(duong_dan_zip, "w", zipfile.ZIP_DEFLATED) as z:
-        # --- Cấu trúc thật: mỗi split có thư mục image/ và label/ ---
+        # --- Cấu trúc và CÁCH ĐẶT TÊN y hệt zip thật (đo được 30/09/2026) ---
+        #   ảnh : FloodNet-Supervised_v1.0/train/train-org-img/1234.jpg
+        #   mask: FloodNet-Supervised_v1.0/train/train-label-img/1234_lab.png
+        # Hậu tố "_lab" là chi tiết đã làm hỏng lần chạy thật đầu tiên: bản test
+        # trước đây đặt hai bên trùng tên nên không bắt được lỗi này.
         for split, so_anh in [("train", 2), ("val", 1), ("test", 2)]:
             for i in range(1, so_anh + 1):
                 loai = i if i <= 2 else 1
-                z.writestr(f"FloodNet-Supervised_v1.0/{split}/image/{i}.jpg",
+                z.writestr(f"FloodNet-Supervised_v1.0/{split}/{split}-org-img/{i}.jpg",
                            ma_hoa_jpg(anh_mau))
-                z.writestr(f"FloodNet-Supervised_v1.0/{split}/label/{i}.png",
-                           ma_hoa_png(tao_mask(loai)))
+                z.writestr(f"FloodNet-Supervised_v1.0/{split}/{split}-label-img/"
+                           f"{i}_lab.png", ma_hoa_png(tao_mask(loai)))
 
-        # --- BẪY: tên có chữ "mask" nhưng là ẢNH MÀU 3 kênh, không phải nhãn ---
+        # --- BẪY: tên có chữ "mask" nhưng là ẢNH MÀU 3 kênh, không phải nhãn.
+        # Thật ra có BA thư mục anh em ruột cùng cha, không phải một. ---
         anh_mau_lon = np.full((1024, 1024, 3), 120, np.uint8)
-        for i in range(1, 4):
-            z.writestr(f"ColorMasks-FloodNetv1.0/{i}.png", ma_hoa_png(anh_mau_lon))
+        for ten_split in ("TrainSet", "ValSet", "TestSet"):
+            for i in range(1, 3):
+                z.writestr(f"ColorMasks-FloodNetv1.0/ColorMasks-{ten_split}/{i}.png",
+                           ma_hoa_png(anh_mau_lon))
 
     return duong_dan_zip
 
@@ -189,12 +196,17 @@ def main():
         # (dòng ở phần CÂY chỉ là "3 file  ColorMasks.../" nên phải lọc theo "kênh")
         dong_phan_loai = [d for d in stdout.splitlines()
                           if "ColorMasks-FloodNetv1.0/" in d and "kênh" in d]
-        kiem(len(dong_phan_loai) == 1,
-             f"co dung 1 dong phan loai cho ColorMasks, thuc te {len(dong_phan_loai)}")
-        if dong_phan_loai:
-            kiem("[ anh]" in dong_phan_loai[0],
-                 f"ColorMasks bi phan loai la ANH MAU, khong phai mask -> {dong_phan_loai[0].strip()}")
-            kiem("3 kênh" in dong_phan_loai[0], "ColorMasks nhan dien dung 3 kenh")
+        # Ba thư mục ColorMasks-*Set là anh em ruột, CẢ BA đều phải được phân loại.
+        # Bản cũ gom theo thư mục cha bằng dict đơn nên hai thư mục sau đè mất thư
+        # mục đầu — test cũ chỉ có một thư mục nên không lộ ra.
+        kiem(len(dong_phan_loai) == 3,
+             f"phan loai du ca 3 thu muc ColorMasks, thuc te {len(dong_phan_loai)}")
+        for d in dong_phan_loai:
+            kiem("[ anh]" in d,
+                 f"ColorMasks bi phan loai la ANH MAU, khong phai mask -> {d.strip()}")
+            kiem("3 kênh" in d, f"ColorMasks nhan dien dung 3 kenh -> {d.strip()}")
+        kiem(all("ColorMasks-" + s in stdout for s in ("TrainSet", "ValSet", "TestSet")),
+             "ca ba thu muc TrainSet/ValSet/TestSet deu xuat hien trong phan loai")
         kiem(not any("ColorMasks" in d and "[ mask]" in d for d in stdout.splitlines()),
              "KHONG co dong nao phan loai ColorMasks la mask")
         kiem("bẫy ColorMasks" in stdout, "co canh bao tu khoa 'bay ColorMasks'")
@@ -204,10 +216,15 @@ def main():
 
         print("\n=== 3. So component phai khop hinh ve tay ===")
         ban_ghi = doc_jsonl(work_dir)
-        kiem(len(ban_ghi) == 5, f"co 5 anh (train 2 + val 1 + test 2), thuc te {len(ban_ghi)}")
+        # Con số này là phép thử thật của việc ghép cặp: ảnh "1.jpg" phải tìm được
+        # mask "1_lab.png" (bỏ hậu tố '_lab'). Quên quy tắc đó thì ban_ghi rỗng
+        # trơn, và mọi mục bên dưới đều đổ theo.
+        kiem(len(ban_ghi) == 5,
+             f"ghep duoc 5 cap anh/mask qua hau to '_lab' "
+             f"(train 2 + val 1 + test 2), thuc te {len(ban_ghi)}")
 
         # Ảnh 1: lớp 1 có 1 component, lớp 2 có 1 component
-        r1 = ban_ghi["FloodNet-Supervised_v1.0/train/image/1.jpg"]
+        r1 = ban_ghi["FloodNet-Supervised_v1.0/train/train-org-img/1.jpg"]
         kiem(r1["lop"]["flooded_building"]["so_component"] == 1,
              "anh 1: lop 1 co dung 1 component")
         kiem(r1["lop"]["non_flooded_building"]["so_component"] == 1,
@@ -221,7 +238,7 @@ def main():
              f"anh 1: kich thuoc sau resize = 150x200, thuc te {r1['kich_thuoc_resize']}")
 
         # Ảnh 2: hai chữ nhật kề nhau -> PHẢI gộp thành 1 component
-        r2 = ban_ghi["FloodNet-Supervised_v1.0/train/image/2.jpg"]
+        r2 = ban_ghi["FloodNet-Supervised_v1.0/train/train-org-img/2.jpg"]
         kiem(r2["lop"]["non_flooded_building"]["so_component"] == 1,
              "anh 2: hai hinh ke nhau GOM thanh 1 component (FloodNet khong co nhan instance)")
         # Bao trùm cả hai hình: rộng 80 -> 40 sau resize, cao 20 -> 10, diện tích 400

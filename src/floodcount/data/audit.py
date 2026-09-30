@@ -35,6 +35,7 @@ import argparse
 import json
 import os
 import random
+import re
 import sys
 import zipfile
 from collections import Counter, defaultdict
@@ -115,6 +116,20 @@ def phan_loai_thu_muc(zf, cay, ds_ten):
     return thong_tin
 
 
+def chuan_hoa_stem(ten_file):
+    """Bỏ hậu tố `_lab` khỏi tên file, để ghép được ảnh với mask.
+
+    FloodNet đặt tên KHÁC NHAU cho hai bên: ảnh là `1234.jpg`, mask là
+    `1234_lab.png`. So tên nguyên bản thì không file nào khớp, dù hai thư mục có
+    đúng bằng nhau số file. Đây là lỗi gặp thật ngày 30/09/2026 trên zip thật —
+    dữ liệu giả ban đầu đặt hai bên trùng tên nên test không bắt được.
+
+    Bỏ hậu tố ở CẢ HAI phía cho an toàn: ảnh không có hậu tố này nên vô hại, mà
+    lỡ về sau ảnh cũng đổi tên theo quy ước khác thì vẫn ghép đúng.
+    """
+    return re.sub(r"_lab$", "", PurePosixPath(ten_file).stem, flags=re.IGNORECASE)
+
+
 def ghep_cap_anh_mask(thong_tin, ds_ten):
     """Ghép mỗi thư mục ẢNH với thư mục MASK cùng cấp, kiểm tra tên file khớp nhau.
 
@@ -124,12 +139,16 @@ def ghep_cap_anh_mask(thong_tin, ds_ten):
     """
     canh_bao = []
 
-    # Gom theo thư mục cha: "FloodNet-Supervised_v1.0/train/image" và
-    # ".../train/label" có cùng cha là ".../train" -> cùng một split.
-    theo_cha = defaultdict(dict)
+    # Gom theo thư mục cha: ".../train/train-org-img" và ".../train/train-label-img"
+    # có cùng cha là ".../train" -> cùng một split.
+    #
+    # Giá trị là DANH SÁCH chứ không phải một thư mục: ba thư mục ColorMasks-*Set
+    # là anh em ruột cùng cha "ColorMasks-FloodNetv1.0", dùng dict đơn thì hai
+    # thư mục sau đè mất thư mục đầu và ta báo thiếu mất hai chỗ.
+    theo_cha = defaultdict(lambda: {"anh": [], "mask": []})
     for thu_muc, tt in thong_tin.items():
         if tt["loai"] in ("mask", "anh"):
-            theo_cha[str(PurePosixPath(thu_muc).parent)][tt["loai"]] = thu_muc
+            theo_cha[str(PurePosixPath(thu_muc).parent)][tt["loai"]].append(thu_muc)
 
     # Gom file theo thư mục một lần
     file_theo_thu_muc = defaultdict(list)
@@ -139,21 +158,29 @@ def ghep_cap_anh_mask(thong_tin, ds_ten):
         file_theo_thu_muc[str(PurePosixPath(ten).parent)].append(ten)
 
     def theo_stem(thu_muc):
-        """{tên_file_không_đuôi: đường_dẫn_đầy_đủ}"""
-        return {PurePosixPath(t).stem: t for t in file_theo_thu_muc.get(thu_muc, [])}
+        """{tên_file_đã_chuẩn_hoá: đường_dẫn_đầy_đủ}"""
+        return {chuan_hoa_stem(t): t for t in file_theo_thu_muc.get(thu_muc, [])}
 
     ds_cap = []
     for cha, hai in sorted(theo_cha.items()):
-        if "anh" not in hai or "mask" not in hai:
+        ds_anh, ds_mask = hai["anh"], hai["mask"]
+        if not ds_anh or not ds_mask:
+            continue
+        if len(ds_anh) > 1 or len(ds_mask) > 1:
+            canh_bao.append(
+                f"[!] '{cha}': có {len(ds_anh)} thư mục ảnh và {len(ds_mask)} thư mục "
+                f"mask cùng cấp -> không biết ghép cái nào với cái nào, bỏ qua. "
+                f"ảnh={ds_anh}, mask={ds_mask}")
             continue
 
-        file_anh, file_mask = theo_stem(hai["anh"]), theo_stem(hai["mask"])
+        file_anh, file_mask = theo_stem(ds_anh[0]), theo_stem(ds_mask[0])
         chung = sorted(set(file_anh) & set(file_mask))
         if not chung:
             canh_bao.append(
-                f"[!] '{cha}': có cả thư mục ảnh và mask nhưng KHÔNG file nào trùng "
-                f"tên -> không ghép cặp được. Thử vài tên: ảnh "
-                f"{list(file_anh)[:2]}, mask {list(file_mask)[:2]}")
+                f"[!] '{cha}': có cả thư mục ảnh và mask nhưng KHÔNG ghép được cặp "
+                f"nào (đã thử bỏ hậu tố '_lab' ở tên).\n"
+                f"    ảnh  ({len(file_anh)}): {sorted(file_anh)[:3]}\n"
+                f"    mask ({len(file_mask)}): {sorted(file_mask)[:3]}")
             continue
         if len(file_anh) != len(file_mask):
             canh_bao.append(
@@ -162,16 +189,18 @@ def ghep_cap_anh_mask(thong_tin, ds_ten):
 
         ds_cap.append((cha, [(file_anh[k], file_mask[k]) for k in chung]))
 
-    # Thư mục có ẢNH MÀU nhưng không có mask cùng cấp -> nghi là bẫy ColorMasks
-    for cha, hai in sorted(theo_cha.items()):
-        if "anh" in hai and "mask" not in hai:
-            tt = thong_tin[hai["anh"]]
-            kt = tt["kich_thuoc"]
-            canh_bao.append(
-                f"[!] '{hai['anh']}' có {tt['so_file']} file ẢNH MÀU "
-                f"{kt[1]}x{kt[0]} nhưng KHÔNG có thư mục mask cùng cấp -> bỏ qua. "
-                f"Nếu tên thư mục có chữ 'mask' thì đây đúng là bẫy ColorMasks "
-                f"(ảnh màu để xem, không phải nhãn).")
+    # Thư mục có ẢNH MÀU nhưng không có mask cùng cấp -> nghi là bẫy ColorMasks.
+    # Gộp thành MỘT cảnh báo: liệt kê từng thư mục ra thì ba dòng giống hệt nhau,
+    # người đọc lại tưởng có ba vấn đề khác nhau.
+    mo_coi = [t for _, hai in sorted(theo_cha.items()) if not hai["mask"]
+              for t in hai["anh"]]
+    if mo_coi:
+        tong = sum(thong_tin[t]["so_file"] for t in mo_coi)
+        canh_bao.append(
+            f"[!] {len(mo_coi)} thư mục có ẢNH MÀU nhưng KHÔNG có thư mục mask cùng "
+            f"cấp -> bỏ qua ({tong} file): " + ", ".join(mo_coi) + ".\n"
+            f"    Nếu tên thư mục có chữ 'mask' thì đây đúng là bẫy ColorMasks "
+            f"(ảnh màu để xem, không phải nhãn).")
 
     return ds_cap, canh_bao
 

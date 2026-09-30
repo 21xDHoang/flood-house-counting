@@ -306,6 +306,40 @@ tự kiểm và báo rõ phải chạy ô `[1.1]` trước.
   ⚠️ Nếu trỏ nhầm vào thư mục gốc, công cụ dò theo tên sẽ tưởng `ColorMasks` là
   mask (vì tên có chữ "mask") → **train trên dữ liệu sai mà không báo lỗi**.
 - Mask là ảnh xám `mode=L`, kích thước **4000×3000** (khác `ColorMasks` 1024×1024).
+
+**Cấu trúc chính xác bên trong zip — đo lại ngày 30/09/2026 bằng `audit.py`:**
+
+| Thư mục | Số file | Đo được |
+|---|---|---|
+| `FloodNet-Supervised_v1.0/train/train-org-img/` | 1445 | ảnh, 3 kênh, 4000×3000 |
+| `FloodNet-Supervised_v1.0/train/train-label-img/` | 1445 | mask, 1 kênh, 4000×3000 |
+| `FloodNet-Supervised_v1.0/val/val-org-img/` | 450 | ảnh |
+| `FloodNet-Supervised_v1.0/val/val-label-img/` | 450 | mask |
+| `FloodNet-Supervised_v1.0/test/test-org-img/` | 448 | ảnh |
+| `FloodNet-Supervised_v1.0/test/test-label-img/` | 448 | mask |
+| `ColorMasks-FloodNetv1.0/ColorMasks-{Train,Val,Test}Set/` | 1445 / 450 / 448 | ảnh MÀU 3 kênh, 1024×1024 |
+
+Hai kết luận quan trọng rút ra từ bảng này:
+
+1. **Tập test CÓ nhãn** (448 mask) — không phải tự chia lại val thành val/test. Giữ
+   nguyên split gốc của FloodNet, đúng tinh thần "test chỉ chạy một lần" ở Phase 5.
+2. **Ảnh và mask cùng kích thước** 4000×3000 — không phải resize mask trước khi lấy
+   box. (Vẫn phải resize vì lý do khác: đưa về `target_long_side` cho vừa VRAM.)
+
+**Quy ước đặt tên — chỗ đã làm hỏng lần chạy thật đầu tiên:**
+
+```
+ảnh : FloodNet-Supervised_v1.0/train/train-org-img/1234.jpg
+mask: FloodNet-Supervised_v1.0/train/train-label-img/1234_lab.png
+```
+
+Hai bên **KHÔNG trùng tên**: mask có thêm hậu tố `_lab`. Ghép cặp bằng cách so tên
+nguyên bản thì không file nào khớp, dù hai thư mục bằng nhau đúng 1445 file. Phải bỏ
+hậu tố `_lab` trước khi so (`chuan_hoa_stem()` trong `audit.py`).
+
+Bài học: bản test đầu tiên đặt ảnh và mask **trùng tên** nên 56 assertion đều pass
+mà vẫn để lọt lỗi này. Dữ liệu giả phải bắt chước cả **quy ước đặt tên** của dữ liệu
+thật, không chỉ cấu trúc thư mục.
 - Bảng lớp (đo bằng tỉ lệ mảng liền kề chạm lớp `Water`, không phải đoán):
 
   | Giá trị | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
@@ -325,9 +359,10 @@ tự kiểm và báo rõ phải chạy ô `[1.1]` trước.
 
 Các số dưới đây chỉ là **kỳ vọng** để đối chiếu, chưa phải kết luận:
 
-- [ ] Số cặp (ảnh, mask) thực tế trong `FloodNet-Supervised_v1.0` và tên các split
-- [ ] Tập **test có nhãn hay không** (nếu không có → phải tự chia lại)
-- [ ] Ảnh và mask có cùng kích thước không (nếu lệch → phải resize mask trước khi lấy box)
+- [x] Số cặp (ảnh, mask) thực tế trong `FloodNet-Supervised_v1.0` và tên các split
+      → **1445 train / 450 val / 448 test**, xem bảng ở §2.1. (đo 30/09/2026)
+- [x] Tập **test có nhãn hay không** → **CÓ**, 448 mask. Giữ nguyên split gốc. (đo 30/09/2026)
+- [x] Ảnh và mask có cùng kích thước không → **cùng 4000×3000**, không lệch. (đo 30/09/2026)
 - [ ] Số ảnh mỗi split, số pixel mỗi lớp, số ảnh có/không có nhà ngập
 - [ ] Phân bố diện tích nhà và **cạnh box nhỏ nhất sau khi resize** → quyết định
       có cần cắt tile hay không (ngưỡng đã chốt trong plan: percentile 5 ≥ ~32px thì không cần)
