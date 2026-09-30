@@ -1,0 +1,65 @@
+# ---------------------------------------------------------------------------
+# Tham số cho bước khảo sát dữ liệu (Phase 1) và chuyển mask -> COCO (Phase 2).
+#
+# Mọi tham số nằm ở đây, KHÔNG hard-code trong code (quy tắc 6 của plan).
+# Giá trị nào chưa chắc thì để mặc định và ghi rõ "Phase 1 sẽ chốt lại".
+# ---------------------------------------------------------------------------
+
+paths:
+  # Zip gốc trên Google Drive. Script đọc TRỰC TIẾP từ trong zip, không giải nén
+  # — lý do ở docs/NOTES.md muc 1.7.
+  zip: /content/drive/MyDrive/Flood_House_AI/floodnet_raw.zip
+
+  # Nơi ghi kết quả cuối (báo cáo + ảnh overlay) để người dùng mở xem được.
+  # Để trên Drive vì /content mất sạch khi runtime reset (NOTES muc 1.6).
+  output_dir: /content/drive/MyDrive/Flood_House_AI/runs/eda
+
+  # Thư mục tạm trên /content cho dữ liệu trung gian (file .jsonl ghi dở).
+  # Cố ý KHÔNG để trên Drive: ghi Drive qua FUSE rất chậm, mà file này chỉ là
+  # phương tiện trung gian, mất cũng không sao.
+  work_dir: /content/floodnet_work
+
+# ---------------------------------------------------------------------------
+# Tiền xử lý — Phase 2 sẽ dùng đúng các giá trị này
+# ---------------------------------------------------------------------------
+preprocess:
+  # Cạnh dài sau khi resize. 1536 là mặc định đã chốt trong plan muc 3.
+  # Phase 1 kiểm tra bằng số liệu xem có phải đổi không (xem decision bên dưới).
+  target_long_side: 1536
+
+  # Diện tích nhỏ nhất (pixel, tính SAU resize) để coi là nhà thật, lọc nhiễu.
+  # Phase 1 đo phân bố diện tích rồi mới chốt — giá trị này là tạm.
+  min_area: 200
+
+  # Hai lớp nhà của đồ án. Giá trị mask lấy theo bảng lớp FloodNet đã kiểm chứng
+  # ở NOTES muc 2.1, nhưng script vẫn xác minh lại trên dữ liệu thật.
+  classes:
+    1: flooded_building
+    2: non_flooded_building
+
+  # Giá trị mask của lớp "Water" (nước) — dùng để kiểm chứng lớp 1 đúng là
+  # "nhà ngập" (nhà ngập phải nằm cạnh nước nhiều hơn nhà không ngập).
+  water_value: 5
+
+# ---------------------------------------------------------------------------
+# Ngưỡng quyết định — plan muc 5, Phase 1. Đọc số liệu ra rồi so với các mốc này.
+# ---------------------------------------------------------------------------
+decisions:
+  # Nếu percentile 5 của cạnh box nhỏ nhất SAU RESIZE >= mốc này (px)
+  # => KHÔNG cần cắt tile.
+  min_box_side_p5_ok: 32
+
+  # Component có diện tích > hệ số này x trung vị => nghi nhiều nhà bị gộp làm một
+  # => phải bật tách bằng distance transform + watershed.
+  area_outlier_ratio: 3.0
+
+# ---------------------------------------------------------------------------
+# Khảo sát
+# ---------------------------------------------------------------------------
+eda:
+  num_overlays: 30
+  seed: 42
+  # Chỉ xử lý N ảnh đầu mỗi split — dùng để chạy thử cho nhanh. null = chạy hết.
+  max_images: null
+  # Số ảnh lấy mẫu để kiểm chứng "nhà ngập nằm cạnh nước" (tốn thời gian hơn).
+  num_water_check: 60

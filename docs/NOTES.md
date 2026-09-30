@@ -224,6 +224,36 @@ Hệ quả bắt buộc cho **mọi phase sau**:
   vì đó là chỗ duy nhất còn dữ liệu sau khi runtime reset. Đây chính là lý do kỹ
   thuật để trả lời khi bảo vệ.
 
+### 1.7 Console Windows không in được tiếng Việt — gặp thật 30/09/2026
+
+Lỗi bắt được khi viết test cho `audit.py`, không phải suy đoán:
+
+```
+> py scripts/audit.py --help
+UnicodeEncodeError: 'charmap' codec can't encode character 'ả' ... cp1252.py
+```
+
+Nguyên nhân: console Windows mặc định dùng bảng mã **cp1252** (Tây Âu), không có
+chữ `ả`. Python gặp chữ có dấu khi ghi ra stdout là ném lỗi ngay và thoát.
+
+Hệ quả nếu không sửa: **mọi script in tiếng Việt đều chết trên máy cá nhân** —
+kể cả `--help`. Trên Colab không thấy vì ở đó mặc định là UTF-8, nên lỗi này chỉ
+lộ ra khi chạy trên máy, rất dễ bị bỏ qua rồi mới vỡ lúc cần dùng.
+
+Cách sửa (đã áp dụng ở đầu `main()` của `audit.py`):
+
+```python
+for luong in (sys.stdout, sys.stderr):
+    try:
+        luong.reconfigure(encoding="utf-8")
+    except (AttributeError, OSError):
+        pass
+```
+
+Trên Colab vốn đã là UTF-8 nên bước này không đổi gì. Test mục 11 ép
+`PYTHONIOENCODING=cp1252` rồi chạy `--help` để **giữ lỗi này không quay lại** —
+sau này thêm script mới thì chép luôn đoạn trên vào `main()`.
+
 ---
 
 ## 2. Dataset FloodNet
@@ -247,6 +277,11 @@ Hệ quả bắt buộc cho **mọi phase sau**:
 
 ### 2.2 Phase 1 PHẢI xác nhận lại (chưa kiểm cho repo này)
 
+> **Trạng thái 30/09/2026:** công cụ đã viết xong và test xong trên dữ liệu giả,
+> **nhưng chưa chạy trên zip thật**. Các ô dưới đây vẫn để trống cho tới khi chạy
+> `notebooks/01_data_prep.ipynb` trên Colab và dán kết quả về. Khi đó điền số thật
+> vào đây — đây chính là nội dung GATE 1.
+
 Các số dưới đây chỉ là **kỳ vọng** để đối chiếu, chưa phải kết luận:
 
 - [ ] Số cặp (ảnh, mask) thực tế trong `FloodNet-Supervised_v1.0` và tên các split
@@ -256,6 +291,22 @@ Các số dưới đây chỉ là **kỳ vọng** để đối chiếu, chưa ph
 - [ ] Phân bố diện tích nhà và **cạnh box nhỏ nhất sau khi resize** → quyết định
       có cần cắt tile hay không (ngưỡng đã chốt trong plan: percentile 5 ≥ ~32px thì không cần)
 
+**Hai điểm lệch có chủ ý so với câu chữ của plan — để bảo vệ được:**
+
+1. Plan viết "giải nén `floodnet_raw.zip` vào `/content`". Bản cài đặt **đọc thẳng
+   từ trong zip**, không giải nén. Lý do: zip ~12 GB, giải nén ra gấp đôi và `/content`
+   chỉ có ~100 GB dùng chung với dataset đã xử lý ở Phase 2; mà Phase 1 chỉ cần đọc
+   từng ảnh một rồi bỏ. Kết quả đo không đổi.
+2. Plan viết overlay ra `outputs/eda/`. Bản cài đặt ghi ra
+   `MyDrive/Flood_House_AI/runs/eda/overlay/`. Lý do: `outputs/` nằm trong `.gitignore`
+   và `/content` mất sạch khi runtime reset (xem §1.6) — để trên Drive thì ảnh còn
+   nguyên mà mở xem bằng điện thoại/máy tính cũng được.
+
+Một điểm **khác plan có chủ ý**: plan nói đo phân bố kích thước nhà "sau khi resize".
+Bản cài đặt resize mask bằng `cv2.INTER_NEAREST` rồi mới tách component — đúng như
+vậy, vì nội suy tuyến tính trên ảnh nhãn sẽ **sinh ra giá trị lớp không tồn tại**
+(ví dụ giữa lớp 1 và lớp 2 nội suy ra 1.5 → làm tròn thành lớp 2, sai nhãn).
+
 ---
 
 ## 3. Việc tiếp theo
@@ -264,6 +315,13 @@ Các số dưới đây chỉ là **kỳ vọng** để đối chiếu, chưa ph
    **Xong 30/09/2026** — xem §1.5 và §1.6.
 2. Repo đã đẩy lên GitHub: **https://github.com/21xDHoang/flood-house-counting**
    (public, nhánh `main`). Colab clone repo này về `/content` ở đầu mỗi phiên.
-3. **Phase 1 (đang làm)**: viết `src/floodcount/data/audit.py` — khảo sát mask thật,
-   trả lời checklist §2.2, đo phân bố kích thước nhà bằng connected components để
-   **chốt bằng số liệu** xem có phải cắt tile hay không.
+3. **Phase 1 — code xong, chờ chạy thật để chốt GATE 1.** Đã đẩy lên GitHub:
+   - `configs/data.yaml` — toàn bộ tham số (đường dẫn, ngưỡng quyết định, tham số EDA)
+   - `src/floodcount/data/audit.py` — khảo sát mask thật, trả lời checklist §2.2
+   - `scripts/audit.py` — CLI mỏng bọc quanh module trên
+   - `tests/test_audit.py` — 46 assertion trên zip giả có cả bẫy ColorMasks
+   - `notebooks/01_data_prep.ipynb` — notebook chạy trên Colab (không cần GPU)
+
+   **Việc của người dùng:** mở `notebooks/01_data_prep.ipynb` trên Colab, chạy ô
+   [1.5] (chạy thử 3 ảnh) trước, rồi ô [1.6] (chạy đầy đủ), rồi gửi lại phần
+   `CẤU TRÚC ZIP`, nội dung `EDA_REPORT.md`, và nhận xét bằng mắt về ảnh overlay.

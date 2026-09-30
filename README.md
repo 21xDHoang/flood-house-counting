@@ -26,7 +26,7 @@ Số liệu và phát hiện đã kiểm chứng thật: [`docs/NOTES.md`](docs/
 | Phase | Nội dung | Trạng thái |
 |---|---|---|
 | 0 | Khởi tạo repo + kiểm tra môi trường Colab | ✅ **GATE 0 đạt** — chạy thật trên Colab T4, đã kiểm chứng đủ (`docs/NOTES.md` §1.5–§1.6) |
-| 1 | Khám phá dữ liệu (EDA) & quyết định tiền xử lý | ⏳ chờ bắt đầu |
+| 1 | Khám phá dữ liệu (EDA) & quyết định tiền xử lý | 🔧 code + test xong, **chờ chạy trên Colab để chốt GATE 1** |
 | 2 | Chuyển mask → COCO & tiền xử lý offline | ⏳ |
 | 3 | Cấu hình model & sanity check (overfit 20 ảnh) | ⏳ |
 | 4 | Huấn luyện baseline (E1) | ⏳ |
@@ -65,6 +65,30 @@ MyDrive/Flood_House_AI/
 └── runs/                # checkpoint, log, kết quả (notebook tự tạo)
 ```
 
+### Chạy Phase 1 (khảo sát dữ liệu)
+
+Mở `notebooks/01_data_prep.ipynb` và chạy từ trên xuống.
+
+- **Không cần GPU** — bước này chỉ đọc ảnh, đếm pixel và tách component bằng CPU.
+  Chạy ở runtime CPU cũng được, khỏi tốn suất T4.
+- **Không cần cài MMDetection** — chỉ dùng `cv2`, `numpy`, `yaml`. Đừng chạy
+  `00_colab_setup.ipynb` chỉ để làm việc này, tốn ~10 phút vô ích.
+
+Hai ô chạy, cố ý tách rời:
+
+| Ô | Việc | Thời gian |
+|---|---|---|
+| `[1.5]` | Chạy thử **3 ảnh mỗi split** vào thư mục `eda_thu` riêng | ~30 giây |
+| `[1.6]` | Chạy **đầy đủ** | ~15–30 phút |
+
+Chạy ô `[1.5]` trước để phát hiện sớm nếu cấu trúc zip khác kỳ vọng — nếu sai thì
+biết sau 30 giây thay vì sau 20 phút. Ô `[1.6]` **tự chạy tiếp nếu bị ngắt**: kết
+quả từng ảnh ghi ngay xuống đĩa, chạy lại sẽ bỏ qua ảnh đã xử lý.
+
+Kết quả nằm ở `MyDrive/Flood_House_AI/runs/eda/`: `EDA_REPORT.md` và thư mục
+`overlay/` chứa ảnh có vẽ box (đỏ = nhà ngập, xanh = không ngập, **tím = box to
+bất thường, nghi bị gộp**).
+
 ---
 
 ## Cấu trúc repo
@@ -74,14 +98,14 @@ MyDrive/Flood_House_AI/
 | `PLAN_DO_AN_DEM_NHA_NGAP.md` | Kế hoạch 8 phase, có GATE giữa các phase |
 | `docs/NOTES.md` | **Ghi chép thực tế**: phiên bản thư viện, cấu trúc dataset, các bẫy đã kiểm chứng |
 | `docs/RESULTS.md` | Bảng kết quả mọi thí nghiệm (sẽ tạo ở Phase 6) |
-| `configs/data.yaml` | Tham số dữ liệu (sẽ tạo ở Phase 2) |
+| `configs/data.yaml` | **Mọi tham số** của Phase 1–2: đường dẫn, ngưỡng quyết định, tham số EDA |
 | `configs/mmdet/` | Config MMDetection của đồ án, kế thừa config gốc |
 | `src/floodcount/data/` | `audit.py` (EDA), `mask_to_coco.py`, `resize.py`, `visualize.py` |
 | `src/floodcount/eval/` | `coco_eval.py` (mAP), `count_eval.py` (MAE/RMSE đếm), `error_analysis.py` |
 | `src/floodcount/infer/` | `predict.py` (ảnh → box + số đếm), `tta_wbf.py` |
 | `scripts/` | Lệnh CLI mỏng gọi vào `src/` |
 | `notebooks/` | Notebook **mỏng** cho Colab — chỉ gọi script, không chứa logic |
-| `tests/` | Test cho bước mask → COCO bằng mask giả lập |
+| `tests/` | Test chạy trên máy CPU, không cần GPU và không cần dataset thật (`test_audit.py`: 46 assertion trên zip giả có cả bẫy ColorMasks) |
 | `outputs/` | Ảnh minh hoạ, overlay, biểu đồ (không đưa lên git) |
 | `requirements-colab.txt` | Bản ghi các gói cài thêm vào Colab (đọc phần đầu file trước khi dùng) |
 
