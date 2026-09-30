@@ -273,9 +273,15 @@ mã 1 mà không nói gì.
 1. **`print` đầu tiên nằm quá muộn.** Trong `audit.py`, dòng in băng-rôn ở sau
    `open(args.config)`. File config mở không được → script thoát trước khi in
    được gì → stdout trống trơn.
-2. **Colab chỉ nối `fd 1` của tiến trình con vào ô output.** `fd 2` (stderr) đi
-   thẳng vào log của máy chủ Jupyter, người dùng không nhìn thấy. Nên traceback
-   `FileNotFoundError` có được ném ra thật, nhưng **vô hình**.
+2. **Trên Colab, tiến trình con thừa hưởng `fd 1`/`fd 2` thì không hiện gì cả.**
+   (Kết luận ban đầu của mình — "chỉ stderr bị giấu" — **sai, đính chính ngay
+   trong mục này**.) Bằng chứng: lần chạy thử cuối cùng thoát với **mã 0**, tức là
+   script chạy trọn vẹn và có in đủ báo cáo, vậy mà ô output vẫn **trống trơn**.
+   Vậy cả stdout lẫn stderr của tiến trình con đều không chảy vào ô output; chỉ
+   những gì đi qua `sys.stdout` của kernel mới hiện.
+
+   Lần duy nhất nhìn thấy output là lần dùng `subprocess.run(..., stdout=PIPE)`
+   rồi tự `print` — chính là mấu chốt để sửa.
 
 Đây là bẫy nguy hiểm vì "không có thông báo lỗi" trông giống hệt "script chạy
 xong không có gì để in" — mất hẳn manh mối để chẩn đoán.
@@ -285,9 +291,21 @@ xong không có gì để in" — mất hẳn manh mối để chẩn đoán.
 - `audit.py`: in băng-rôn **trước** khi mở config, và kiểm file config có tồn tại
   không rồi in thông báo tiếng Việt rõ ràng (kèm gợi ý chạy lại ô `[1.3]`).
   Nguyên tắc rút ra: **dòng in đầu tiên phải nằm trước mọi thứ có thể thất bại.**
-- Notebook: hai ô chạy đều truyền `stderr=subprocess.STDOUT` để gộp stderr của
-  tiến trình con vào fd 1. Vẫn giữ được log hiện dần theo thời gian thực, mà
-  traceback không biến mất nữa. **Ô chạy nào sau này thêm vào cũng phải có dòng này.**
+- Notebook: hai ô chạy **tự đọc ống dẫn rồi in qua `sys.stdout` của kernel**, chứ
+  không để tiến trình con thừa hưởng fd 1. Vẫn giữ được log hiện dần theo thời
+  gian thực. Kèm `-u` cho python con, vì không có nó thì chính tiến trình con lại
+  đệm theo khối và màn hình im lặng vài phút rồi output mới ập ra một lúc.
+
+  ```python
+  kq = subprocess.Popen(lenh, cwd=cwd, stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT, text=True, bufsize=1)
+  for dong in kq.stdout:
+      print(dong, end="")
+  kq.wait()
+  ```
+
+  **Ô chạy nào sau này thêm vào cũng phải làm theo cách này.** Test mục 11 khoá
+  lại: cấm `subprocess.run(lenh_thu...)`, bắt buộc có `-u` và có hàm đọc ống.
 - Test mục 10 và 11 kiểm cả hai điều trên, để không tái phát.
 
 **Còn một lớp bẫy nữa ở notebook:** Colab chạy từng ô độc lập, nhảy thẳng xuống

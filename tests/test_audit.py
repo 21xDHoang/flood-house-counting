@@ -338,17 +338,26 @@ def main():
                 compile("".join(c["source"]), f"nb-cell-{i}", "exec")
         kiem(True, "moi o code cua notebook 01 compile duoc")
 
-        # Colab chỉ nối fd 1 của tiến trình con vào ô output; fd 2 (stderr) đi vào
-        # log máy chủ Jupyter và người dùng không thấy. Thiếu stderr=STDOUT thì mọi
-        # traceback biến mất, chỉ còn "Mã thoát: 1" — đúng cái bẫy đã sập ngày 30/09.
-        # Bỏ dòng comment: chính comment giải thích cũng nhắc lại chuỗi này.
+        # Trên Colab, fd 1 của tiến trình con KHÔNG chảy vào ô output: script chạy
+        # xong, mã thoát 0, mà ô output trống trơn. Dính ba lần ngày 30/09/2026 mới
+        # nhận ra quy luật, nên phải khoá lại bằng test.
+        # Bỏ dòng comment: chính comment giải thích cũng nhắc lại các chuỗi này.
         ma_nguon_tam = "\n".join(
             d for d in ("\n".join("".join(c["source"]) for c in nb["cells"]
                                   if c["cell_type"] == "code")).splitlines()
             if not d.lstrip().startswith("#"))
-        so_lan = ma_nguon_tam.count("stderr=subprocess.STDOUT")
-        kiem(so_lan == 2,
-             f"ca HAI o chay deu truyen stderr=subprocess.STDOUT (thuc te {so_lan})")
+        kiem("def chay_hien_dan(" in ma_nguon_tam,
+             "co ham chay_hien_dan tu doc ong roi in qua stdout cua kernel")
+        so_lan_goi = ma_nguon_tam.count("chay_hien_dan(lenh_")
+        kiem(so_lan_goi == 2,
+             f"ca HAI o chay deu goi chay_hien_dan (thuc te {so_lan_goi})")
+        so_lan_u = ma_nguon_tam.count('"-u"')
+        kiem(so_lan_u == 2,
+             f"ca hai lenh chay deu truyen -u cho python con (thuc te {so_lan_u})")
+        # Chỉ soi hai lệnh chạy dài. `chay()` của ô [1.3] vẫn dùng subprocess.run
+        # nhưng có capture_output rồi tự print, nên nó hiện ra bình thường.
+        kiem(not re.search(r"subprocess\.run\(\s*lenh_(thu|day_du)", ma_nguon_tam),
+             "khong chay lenh dai bang subprocess.run thua huong fd 1")
 
         # Bỏ các dòng gọi git: `--oneline` là cờ của git chứ không phải của audit.py
         ma_nguon = "\n".join("".join(c["source"]) for c in nb["cells"]
