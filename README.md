@@ -36,16 +36,27 @@ Số liệu và phát hiện đã kiểm chứng thật: [`docs/NOTES.md`](docs/
 
 ---
 
-## Cách chạy (Phase 0)
+## Cách chạy
 
-1. Mở [Google Colab](https://colab.research.google.com/) → `File → Upload notebook` →
-   chọn `notebooks/00_colab_setup.ipynb`.
-2. `Runtime → Change runtime type → T4 GPU`.
-3. Chạy lần lượt từ trên xuống. Notebook tự cài môi trường và **không cần restart
+Repo: **https://github.com/21xDHoang/flood-house-counting** (public)
+
+Trên Google Colab, mở một notebook trống và clone repo về `/content`:
+
+```python
+!git clone https://github.com/21xDHoang/flood-house-counting.git /content/flood-house-counting
+```
+
+Repo **public** nên clone không cần token. Sau đó mở
+`notebooks/00_colab_setup.ipynb` từ cây thư mục bên trái Colab rồi:
+
+1. `Runtime → Change runtime type → T4 GPU`.
+2. Chạy lần lượt từ trên xuống. Notebook tự cài môi trường và **không cần restart
    runtime** (xem lý do ở mục "Quyết định" bên dưới).
-4. Ô cuối in ra khối **"BÁO CÁO GATE 0"** — copy nguyên khối đó gửi lại để chốt GATE 0.
+3. Ô cuối in ra khối **"BÁO CÁO GATE 0"**.
 
-Dữ liệu và kết quả nằm trên Drive của bạn:
+(Vì sao clone về `/content` mà không chạy thẳng trên Drive — xem mục "Quyết định".)
+
+Dữ liệu và kết quả nằm trên Drive, **không** nằm trong repo:
 
 ```
 MyDrive/Flood_House_AI/
