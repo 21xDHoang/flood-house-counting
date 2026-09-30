@@ -1,0 +1,32 @@
+# ============================================================================
+# Thư viện cài THÊM vào Colab cho đồ án.
+#
+# Colab đã có sẵn torch, CUDA, opencv, numpy, pandas, matplotlib, seaborn,
+# scikit-image nên KHÔNG ghim lại các gói đó — ghim chúng chỉ tạo thêm rủi ro
+# xung đột mỗi khi Colab nâng cấp.
+#
+# CÁCH CÀI: ĐỪNG chạy `pip install -r requirements-colab.txt`.
+#   mmcv không ghim cứng được trong file này, vì tên bản dựng của nó phụ thuộc
+#   tổ hợp Python + torch + CUDA mà Colab cấp ở từng thời điểm (ví dụ
+#   mmcv-2.2.0+a8073c7pt2.11.0cu128-cp313-cp313-linux_x86_64.whl).
+#   Notebook notebooks/00_colab_setup.ipynb tự dò rồi cài đúng wheel.
+#   File này là bản ghi lại những gì notebook cài, để tái lập và đối chiếu.
+#
+# Số phiên bản dưới đây tra từ nguồn chính thức ngày 30/09/2026.
+# Xem docs/NOTES.md mục 1 để biết nguồn và lý do của từng dòng.
+# ============================================================================
+
+mmengine==0.10.7        # bản ổn định mới nhất; đã sửa lỗi trùng tên Adafactor
+mmdet==3.3.0            # bản cuối của MMDetection (5/2024), vẫn là mới nhất
+mmpretrain==1.2.0       # BẮT BUỘC: backbone ConvNeXt nằm trong mmpretrain.
+                        # Config gốc của mmdet có custom_imports mmpretrain.models
+                        # với allow_failed_imports=False -> thiếu gói là chết ngay.
+pycocotools==2.0.11     # đọc/ghi COCO JSON và chạy COCO eval
+
+# mmcv: KHÔNG ghim ở đây — xem giải thích ở đầu file.
+#   Bản dùng là 2.2.0 nhưng kèm hậu tố bản dựng, cài từ index cộng đồng
+#   https://miropsota.github.io/torch_packages_builder
+#   (OpenMMLab ngừng phát hành mmcv từ 7/2024; wheel chính thức chỉ tới Python 3.12)
+
+# --- Cài ở Phase 6, chưa cần bây giờ -----------------------------------------
+# ensemble-boxes==1.0.9   # WBF — hợp nhất box từ nhiều lần suy luận (TTA)

@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Kết quả chạy — dữ liệu lớn, không đưa lên git
+outputs/
+runs/
+*.pth
+*.whl
+
+# Dữ liệu — TUYỆT ĐỐI không đưa lên git.
+# floodnet_raw.zip nặng ~13 GB; GitHub chặn file >100 MB và sẽ từ chối cả lần push.
+# Dữ liệu nằm trên Google Drive (Flood_House_AI/), không nằm trong repo.
+*.zip
+*.tar
+*.tar.gz
+
+# Dấu "/" ở ĐẦU là bắt buộc: không có nó, mẫu "data/" khớp ở MỌI cấp thư mục
+# và sẽ nuốt luôn src/floodcount/data/ — package chứa code Phase 1-2.
+/data/
+/datasets/
+
+# Nháp
+*.tmp
+Thumbs.db
+.vscode/
+.idea/

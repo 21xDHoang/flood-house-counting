@@ -1,0 +1,14 @@
+# Chuẩn hoá xuống dòng về LF khi lưu trong repo.
+# Lý do: máy này là Windows (CRLF), Colab là Linux (LF). File .sh hoặc file
+# văn bản có CRLF khi chạy trên Linux sẽ lỗi "bad interpreter: No such file".
+# Khai báo ở đây để git tự đổi, không phải nhớ làm tay.
+* text=auto eol=lf
+
+# Notebook là JSON — để nguyên, không đụng vào xuống dòng
+*.ipynb -text
+
+# Ảnh và file nén: nhị phân, git không được sửa nội dung
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.zip binary
