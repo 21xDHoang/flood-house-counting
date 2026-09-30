@@ -25,8 +25,8 @@ Số liệu và phát hiện đã kiểm chứng thật: [`docs/NOTES.md`](docs/
 
 | Phase | Nội dung | Trạng thái |
 |---|---|---|
-| 0 | Khởi tạo repo + kiểm tra môi trường Colab | ✅ **GATE 0 đạt** — đã chạy thật trên Colab T4 (xem `docs/NOTES.md` §1.5) |
-| 1 | Khám phá dữ liệu (EDA) & quyết định tiền xử lý | ⏳ chờ xác nhận GATE 0 |
+| 0 | Khởi tạo repo + kiểm tra môi trường Colab | ✅ **GATE 0 đạt** — chạy thật trên Colab T4, đã kiểm chứng đủ (`docs/NOTES.md` §1.5–§1.6) |
+| 1 | Khám phá dữ liệu (EDA) & quyết định tiền xử lý | ⏳ chờ bắt đầu |
 | 2 | Chuyển mask → COCO & tiền xử lý offline | ⏳ |
 | 3 | Cấu hình model & sanity check (overfit 20 ảnh) | ⏳ |
 | 4 | Huấn luyện baseline (E1) | ⏳ |

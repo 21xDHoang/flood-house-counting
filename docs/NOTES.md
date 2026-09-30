@@ -170,6 +170,12 @@ Chạy ô [0.4] và [0.7] trên Colab, runtime **T4 GPU**:
   — đúng với ảnh demo (cảnh đường phố). Nghĩa là `roi_align` và `nms` của mmcv chạy
   thật trong mạng đầy đủ, wheel **không thiếu kiến trúc `sm_75`** của T4.
   (Nạp model 12 giây; clone repo mmdet chỉ 3 giây.)
+- **Đường ghi ra Drive hoạt động thật**: kiểm `runs/phase0_smoke/vis/` thấy tệp
+  `demo.jpg` nặng **179.472 byte**, giờ 10:16 — khớp lượt chạy GATE 0. Ảnh lỗi hoặc
+  rỗng sẽ chỉ vài trăm byte hoặc 0 byte, nên đây là ảnh có nội dung thật.
+  → Xác nhận **không chỉ đường dẫn được tạo** mà ghi tệp ra Drive thật sự chạy.
+  Đây chính là đường mà Phase 4–6 dựa vào để lưu checkpoint và kết quả; nếu nó hỏng
+  mà không biết thì sẽ train xong mới phát hiện mất trắng.
 
 **Báo cáo GATE 0 đầy đủ — 30/09/2026 10:17 giờ Colab, Tesla T4 15,6 GB:**
 
