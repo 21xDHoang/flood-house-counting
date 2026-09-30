@@ -28,8 +28,10 @@ preprocess:
   target_long_side: 1536
 
   # Diện tích nhỏ nhất (pixel, tính SAU resize) để coi là nhà thật, lọc nhiễu.
-  # Phase 1 đo phân bố diện tích rồi mới chốt — giá trị này là tạm.
-  min_area: 200
+  # Đặt bằng min_side_px^2 = 8^2 để hai ngưỡng không mâu thuẫn nhau: một mảng
+  # 1x500px lọt qua ngưỡng diện tích nhưng vẫn là vệt rác. Nhất quán cả hai thì
+  # "nhà hợp lệ" chỉ có một định nghĩa duy nhất trong toàn bộ pipeline.
+  min_area: 64
 
   # Hai lớp nhà của đồ án. Giá trị mask lấy theo bảng lớp FloodNet đã kiểm chứng
   # ở NOTES muc 2.1, nhưng script vẫn xác minh lại trên dữ liệu thật.
@@ -45,8 +47,20 @@ preprocess:
 # Ngưỡng quyết định — plan muc 5, Phase 1. Đọc số liệu ra rồi so với các mốc này.
 # ---------------------------------------------------------------------------
 decisions:
-  # Nếu percentile 5 của cạnh box nhỏ nhất SAU RESIZE >= mốc này (px)
-  # => KHÔNG cần cắt tile.
+  # Cạnh nhỏ nhất (px) để một component được coi là box thật. Component nhỏ hơn
+  # bị loại TRƯỚC KHI tính mọi thống kê và mọi quyết định bên dưới.
+  #
+  # Vì sao cần: lần chạy thử 30/09/2026 cho percentile 5 cạnh box = 1.0px trong
+  # khi trung vị = 118px. Con số 1.0px đó là đốm nhiễu vài pixel trong mask, không
+  # phải nhà — nhưng nó đủ sức kéo percentile 5 xuống và làm script kết luận "phải
+  # cắt tile". Nhiễu gán nhãn đang quyết định thay nhà thật.
+  #
+  # Chọn 8: nhỏ hơn 8px thì ở cạnh dài 1536px mắt người cũng không nhận ra đó là
+  # căn nhà nào, giữ lại chỉ thêm rác cho cả lúc train lẫn lúc đếm.
+  min_side_px: 8
+
+  # Nếu percentile 5 của cạnh box nhỏ nhất SAU RESIZE (đã lọc nhiễu) >= mốc này
+  # (px) => KHÔNG cần cắt tile.
   min_box_side_p5_ok: 32
 
   # Component có diện tích > hệ số này x trung vị => nghi nhiều nhà bị gộp làm một

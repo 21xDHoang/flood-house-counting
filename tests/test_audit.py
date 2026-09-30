@@ -108,8 +108,33 @@ def tao_zip_gia(duong_dan_zip):
     return duong_dan_zip
 
 
+def tao_zip_sach(duong_dan_zip):
+    """Zip giả CHỈ có lớp 1, toàn nhà to, kèm đúng một đốm nhiễu nhỏ.
+
+    Bộ dữ liệu giả chính có đủ hai lớp nên không dựng lại được hai tình huống đã
+    gặp thật ngày 30/09/2026 trên dữ liệu FloodNet:
+
+      - Nhà to nhưng lẫn một đốm nhiễu -> percentile 5 THÔ tụt xuống vài pixel.
+        Kết luận tiling phải đổi theo nếu script biết lọc nhiễu trước.
+      - Một lớp khai báo trong config nhưng vắng mặt hoàn toàn trong dữ liệu.
+
+    Đây là zip riêng, nhỏ, chạy nhanh, để hai tình huống đó có test khoá lại.
+    """
+    anh_mau = np.full((H, W, 3), 180, np.uint8)
+    mask = np.zeros((H, W), np.uint8)
+    mask[20:100, 20:100] = 1        # nhà to: 80x80 -> 40x40 sau resize, cạnh 40px
+    mask[200:202, 300:302] = 1      # đốm nhiễu 2x2 -> 1x1 sau resize, cạnh 1px
+
+    with zipfile.ZipFile(duong_dan_zip, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("FloodNet-Supervised_v1.0/train/train-org-img/1.jpg",
+                   ma_hoa_jpg(anh_mau))
+        z.writestr("FloodNet-Supervised_v1.0/train/train-label-img/1_lab.png",
+                   ma_hoa_png(mask))
+    return duong_dan_zip
+
+
 def tao_config_gia(duong_dan_yaml, zip_path, output_dir, work_dir):
-    """Config tối thiểu, trỏ vào dữ liệu giả."""
+    """Config tối thiểu, trỏ vào dữ liệu giả. Dùng y hệt khoá của configs/data.yaml."""
     noi_dung = f"""
 paths:
   zip: {zip_path.replace(chr(92), '/')}
@@ -117,12 +142,13 @@ paths:
   work_dir: {work_dir.replace(chr(92), '/')}
 preprocess:
   target_long_side: {TARGET}
-  min_area: 200
+  min_area: 64
   classes:
     1: flooded_building
     2: non_flooded_building
   water_value: 5
 decisions:
+  min_side_px: 8
   min_box_side_p5_ok: 32
   area_outlier_ratio: 3.0
 eda:
@@ -164,6 +190,37 @@ def doc_jsonl(work_dir):
                 r = json.loads(dong)
                 ban_ghi[r["anh"]] = r
     return ban_ghi
+
+
+def doc_dong_lop(bao_cao, ten_lop):
+    """Tách dòng của một lớp trong bảng 'Thống kê theo lớp' thành list ô đã strip.
+
+    Trả về None nếu không có dòng nào. Thứ tự ô theo đúng header của bảng:
+      1=tên lớp, 2=giá trị mask, 3=số box, 4=bỏ do nhiễu, 5=box/ảnh TB,
+      6=box/ảnh max, 7=p5 đã lọc, 8=p50 đã lọc, 9=p5 thô, 10=diện tích p50,
+      11=box to bất thường.
+    Kiểm bằng ô số chứ không so cả dòng: so cả dòng thì mỗi lần đổi định dạng
+    hiển thị là test đỏ, mà định dạng hiển thị không phải thứ cần bảo vệ.
+    """
+    for d in bao_cao.splitlines():
+        if d.startswith(f"| {ten_lop} |"):
+            return [o.strip() for o in d.split("|")]
+    return None
+
+
+def co_khoa(cfg, duong_dan_khoa):
+    """True nếu config CÓ khoá này — kể cả khi giá trị là `null`.
+
+    Không dùng `.get()` rồi so với None: `eda.max_images: null` là giá trị hợp lệ
+    (nghĩa là "chạy hết"), mà `.get()` trả None cho cả trường hợp thiếu khoá lẫn
+    trường hợp khoá có giá trị null — hai chuyện hoàn toàn khác nhau.
+    """
+    nut = cfg
+    for phan in duong_dan_khoa.split("."):
+        if not isinstance(nut, dict) or phan not in nut:
+            return False
+        nut = nut[phan]
+    return True
 
 
 def main():
@@ -261,10 +318,26 @@ def main():
         kiem("| non_flooded_building | 3 | 0 | 0.0% |" in bao_cao,
              "lop 2: 0/3 component cham nuoc (0%)")
 
-        print("\n=== 5. Ket luan tiling dua tren so lieu ===")
+        print("\n=== 5. Ket luan tiling dua tren so lieu DA LOC NHIEU ===")
+        # Ảnh 2 có một đốm nhiễu 2x2 ở lớp 1. Không lọc thì percentile 5 thô của
+        # lớp 1 bị kéo xuống ~2px và kết luận "phải cắt tile" là do RÁC quyết định,
+        # không phải do nhà — đúng cái bẫy đã gặp thật ngày 30/09/2026 (p5 = 1.0px
+        # trong khi p50 = 118px). Bảng phải có đủ hai cột để đối chiếu được.
+        o1 = doc_dong_lop(bao_cao, "flooded_building")
+        o2 = doc_dong_lop(bao_cao, "non_flooded_building")
+        # Lớp 1 có 5 box trong 5 ảnh: 3 chữ nhật to (train/1, val/1, test/1) và 2 đốm
+        # nhiễu (train/2, test/2). Chỉ hai đốm bị lọc.
+        kiem(o1 is not None and o1[3] == "5" and o1[4] == "2",
+             f"lop 1: 5 box, dung 2 dom nhieu bi loc, thuc te {o1[3:5] if o1 else None}")
+        kiem(o2 is not None and o2[4] == "0",
+             f"lop 2: khong box nao bi loc, thuc te {o2[4] if o2 else None}")
+        kiem(o1 is not None and float(o1[9]) < float(o1[7]),
+             f"p5 tho ({o1[9] if o1 else '?'}) nho hon han p5 da loc "
+             f"({o1[7] if o1 else '?'}) -> hai cot phai khac nhau")
         kiem("Cắt tile: CÓ" in bao_cao,
-             "canh p5 = 1px < 32px -> ket luan PHAI cat tile")
-        kiem("min_area đề xuất" in bao_cao, "bao cao co de xuat min_area")
+             "canh p5 DA LOC nho nhat = 10px < 32px -> ket luan PHAI cat tile")
+        kiem("min_area đề xuất: 64" in bao_cao,
+             "min_area de xuat = min_side^2 = 8^2 = 64")
 
         print("\n=== 6. Anh overlay duoc tao, KHONG bi ghi de ===")
         thu_muc_overlay = Path(output_dir, "overlay")
@@ -378,6 +451,67 @@ def main():
         kiem("Khảo sát" in tro_giup, "chu co dau ra dung utf-8, khong bi thay bang '?'")
         for co in co_dung:
             kiem(co in tro_giup, f"notebook dung co {co}, va co nay CO THAT trong audit.py")
+
+        print("\n=== 12. Loc nhieu phai DOI DUOC ket luan + canh bao lop vang mat ===")
+        # Hai chuyện này chỉ lộ ra khi chạy trên dữ liệu THẬT (30/09/2026), vì bộ
+        # dữ liệu giả chính vừa đủ hai lớp vừa không có ca "nhà to lẫn đốm rác".
+        # Không dựng test cho chúng thì lần sau sửa code lại trôi mất.
+        zip_sach = tao_zip_sach(os.path.join(tmp, "sach.zip"))
+        work_sach = os.path.join(tmp, "work_sach")
+        output_sach = os.path.join(tmp, "eda_sach")
+        config_sach = tao_config_gia(os.path.join(tmp, "sach.yaml"), zip_sach,
+                                     output_sach, work_sach)
+        ma_sach, stdout_sach, stderr_sach = chay_audit(config_sach, work_sach)
+        if ma_sach != 0:
+            print(stdout_sach[-3000:])
+            print(stderr_sach[-3000:])
+            raise SystemExit(f"*** audit.py tren zip 'sach' thoat voi ma {ma_sach} ***")
+
+        bao_cao_sach = Path(output_sach, "EDA_REPORT.md").read_text(encoding="utf-8")
+        dong_sach = doc_dong_lop(bao_cao_sach, "flooded_building")
+        kiem(dong_sach is not None and dong_sach[3] == "2" and dong_sach[4] == "1",
+             f"lop 1: 2 box, 1 dom nhieu bi loc, "
+             f"thuc te {dong_sach[3:5] if dong_sach else None}")
+        kiem(dong_sach is not None and float(dong_sach[7]) >= 32,
+             f"p5 DA LOC = {dong_sach[7] if dong_sach else '?'}px (nha that canh 40px)")
+        kiem(dong_sach is not None and float(dong_sach[9]) < 32,
+             f"p5 THO = {dong_sach[9] if dong_sach else '?'}px "
+             f"bi dom nhieu keo xuong duoi nguong")
+        # Đây mới là điều đáng test: dùng nhầm cột thì kết luận đảo ngược hẳn.
+        kiem("Cắt tile: KHÔNG" in bao_cao_sach,
+             "ket luan dung p5 DA LOC -> KHONG can cat tile "
+             "(lay p5 tho thi da ket luan sai thanh CO)")
+
+        # Lớp vắng mặt: mẫu 9 ảnh thật ngày 30/09/2026 không có pixel nào của lớp 1.
+        # Nếu chỉ in ra một dòng "so_box = 0" trong bảng thì rất dễ đọc lướt qua.
+        kiem("CẢNH BÁO: có lớp không xuất hiện trong dữ liệu" in bao_cao_sach,
+             "bao cao co canh bao lop khai bao ma khong co pixel nao")
+        kiem("non_flooded_building (giá trị mask 2)" in bao_cao_sach,
+             "canh bao neu DUNG TEN lop vang mat va gia tri mask cua no")
+        kiem(bao_cao_sach.index("CẢNH BÁO") < bao_cao_sach.index("## Thống kê theo lớp"),
+             "canh bao nam TRUOC bang so lieu, khong phai doc luot qua")
+        kiem("| non_flooded_building | 2 | 0 |" in bao_cao_sach,
+             "lop vang mat van co dong rieng trong bang, ghi ro 0 box")
+
+        print("\n=== 13. configs/data.yaml THAT phai co du moi khoa audit.py doc ===")
+        # File config thật chỉ được chạy trên Colab, mà vòng sửa-lỗi ở đó rất đắt
+        # (một lần chạy là một lần chờ). Thiếu một khoá thì lỗi chỉ lộ ra ở đó, dưới
+        # dạng KeyError — nên kiểm ngay trên máy, gần như miễn phí.
+        import yaml
+        cfg_that = yaml.safe_load((GOC_REPO / "configs" / "data.yaml").read_text(encoding="utf-8"))
+        for duong_dan_khoa in [
+                "paths.zip", "paths.output_dir", "paths.work_dir",
+                "preprocess.target_long_side", "preprocess.min_area",
+                "preprocess.classes", "preprocess.water_value",
+                "decisions.min_side_px", "decisions.min_box_side_p5_ok",
+                "decisions.area_outlier_ratio",
+                "eda.num_overlays", "eda.seed", "eda.max_images", "eda.num_water_check"]:
+            kiem(co_khoa(cfg_that, duong_dan_khoa),
+                 f"configs/data.yaml co khoa {duong_dan_khoa}")
+        # min_area phải khớp min_side^2, nếu không thì "nhà hợp lệ" có hai định nghĩa
+        # khác nhau trong cùng một pipeline: Phase 1 lọc một kiểu, Phase 2 lọc kiểu khác.
+        kiem(cfg_that["preprocess"]["min_area"] == cfg_that["decisions"]["min_side_px"] ** 2,
+             "min_area == min_side_px^2 (hai nguong khong mau thuan)")
 
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

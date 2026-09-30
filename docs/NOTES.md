@@ -370,10 +370,10 @@ thật, không chỉ cấu trúc thư mục.
 
 ### 2.2 Phase 1 PHẢI xác nhận lại (chưa kiểm cho repo này)
 
-> **Trạng thái 30/09/2026:** công cụ đã viết xong và test xong trên dữ liệu giả,
-> **nhưng chưa chạy trên zip thật**. Các ô dưới đây vẫn để trống cho tới khi chạy
-> `notebooks/01_data_prep.ipynb` trên Colab và dán kết quả về. Khi đó điền số thật
-> vào đây — đây chính là nội dung GATE 1.
+> **Trạng thái 30/09/2026:** công cụ đã viết xong, test xong trên dữ liệu giả, và đã
+> chạy **thử 9 ảnh** trên zip thật (kết quả ở §2.3). Các ô dưới đây vẫn để trống cho
+> tới khi chạy **đầy đủ** `notebooks/01_data_prep.ipynb` trên Colab và dán kết quả về.
+> Khi đó điền số thật vào đây — đây chính là nội dung GATE 1.
 
 Các số dưới đây chỉ là **kỳ vọng** để đối chiếu, chưa phải kết luận:
 
@@ -401,6 +401,57 @@ Bản cài đặt resize mask bằng `cv2.INTER_NEAREST` rồi mới tách compo
 vậy, vì nội suy tuyến tính trên ảnh nhãn sẽ **sinh ra giá trị lớp không tồn tại**
 (ví dụ giữa lớp 1 và lớp 2 nội suy ra 1.5 → làm tròn thành lớp 2, sai nhãn).
 
+### 2.3 Lần chạy thử 9 ảnh trên zip THẬT — hai lỗi phương pháp lộ ra (30/09/2026)
+
+Chạy `--max-images 3` (3 ảnh mỗi split, tổng 9 ảnh). Mục đích ban đầu chỉ là kiểm cấu
+trúc, nhưng chính lần chạy nhỏ này phát hiện hai lỗi mà 62 assertion lúc đó trên dữ liệu
+giả không bắt được. **Chưa kết luận gì về dataset từ 9 ảnh** — số liệu dưới đây chỉ dùng
+để soi lỗi công cụ.
+
+**Lỗi 1 — nhiễu gán nhãn đang quyết định thay nhà thật.**
+
+Báo cáo in ra: `flooded_building` có `p5 = 1.0px` trong khi `p50 = 118.0px`, và căn cứ
+vào đó kết luận **"Cắt tile: CÓ"**. Nhưng p5 = 1px là **đốm vài pixel** trong mask, không
+phải căn nhà nào. Nghĩa là một quyết định về độ phân giải của cả đồ án lại do rác gán
+nhãn quyết định.
+
+Cách sửa: thêm `decisions.min_side_px = 8` vào config. Component có cạnh nhỏ nhất < 8px
+bị loại **trước khi tính mọi thống kê và mọi kết luận**. Bảng báo cáo giữ **cả hai cột**
+(`p5 đã lọc` và `p5 thô`) để người đọc tự thấy mức nhiễu — giấu cột thô đi thì không ai
+kiểm chứng được nữa.
+
+Vì sao lọc theo **cạnh nhỏ nhất** chứ không theo diện tích: một mảng 1×500 pixel có diện
+tích lớn hơn ngưỡng nhưng vẫn là vệt rác, không phải nhà. `preprocess.min_area` cũng đổi
+thành `min_side_px² = 64` để hai ngưỡng không mâu thuẫn nhau.
+
+**Lỗi 2 — lớp bắt buộc phải có mà không có pixel nào, báo cáo chỉ ghi một dòng `0`.**
+
+Trong 9 ảnh này lớp 1 (`flooded_building`) **không có pixel nào**. Nếu cứ thế mà train
+thì model học lớp "nhà ngập" từ hư không. Báo cáo cũ chỉ in một dòng `| flooded_building |
+1 | 0 |` giữa bảng — rất dễ đọc lướt qua.
+
+Cách sửa: `ket_luan()` kiểm việc này **trước mọi kết luận khác**, và báo cáo đặt khối
+`> ## ⚠️ CẢNH BÁO` **ngay đầu file, trước cả bảng số liệu**.
+
+**Câu hỏi còn để mở — phải chạy đầy đủ mới trả lời được:**
+
+Bảng "Số pixel mỗi giá trị mask" của 9 ảnh đó chỉ có các giá trị `{2, 4, 5, 6, 7, 8, 9}`;
+các giá trị `0` (nền), `1` (Building-Flooded), `3` (Road-Flooded) đều **không xuất hiện**.
+Thiếu `0` là chuyện đáng ngờ — mask nào cũng phải có nền. Hai khả năng:
+
+1. 9 ảnh này không đại diện: chúng là 3 cụm ID gần nhau (10168, 10169, 10173), nhiều khả
+   năng cùng một chuyến bay, cùng một khu — nên cùng thiếu một số lớp.
+2. Bảng lớp trong §2.1 sai với bản zip này, và giá trị lớp bị lệch.
+
+Phân biệt được bằng cách chạy **đầy đủ** rồi đọc lại đúng bảng đó. Nếu chạy hết 2343 ảnh
+mà `1` vẫn không có pixel nào thì gần như chắc chắn là khả năng 2, phải dừng lại tra bảng
+lớp trước khi sang Phase 2.
+
+Trạng thái đường ống: đã đóng gói lại thành `min_side_px` trong config, cảnh báo lớp vắng
+mặt, và **8 assertion mới** khoá hai hành vi này lại (`tests/test_audit.py` mục 12) —
+trong đó có ca "nhà to lẫn một đốm nhiễu": lấy nhầm cột thì kết luận đảo ngược từ KHÔNG
+thành CÓ.
+
 ---
 
 ## 3. Việc tiếp theo
@@ -413,9 +464,13 @@ vậy, vì nội suy tuyến tính trên ảnh nhãn sẽ **sinh ra giá trị l
    - `configs/data.yaml` — toàn bộ tham số (đường dẫn, ngưỡng quyết định, tham số EDA)
    - `src/floodcount/data/audit.py` — khảo sát mask thật, trả lời checklist §2.2
    - `scripts/audit.py` — CLI mỏng bọc quanh module trên
-   - `tests/test_audit.py` — 46 assertion trên zip giả có cả bẫy ColorMasks
+   - `tests/test_audit.py` — 85 assertion trên zip giả có cả bẫy ColorMasks
    - `notebooks/01_data_prep.ipynb` — notebook chạy trên Colab (không cần GPU)
 
    **Việc của người dùng:** mở `notebooks/01_data_prep.ipynb` trên Colab, chạy ô
    [1.5] (chạy thử 3 ảnh) trước, rồi ô [1.6] (chạy đầy đủ), rồi gửi lại phần
    `CẤU TRÚC ZIP`, nội dung `EDA_REPORT.md`, và nhận xét bằng mắt về ảnh overlay.
+
+   Ô [1.5] **đã chạy xong ngày 30/09/2026** và đã soi ra hai lỗi phương pháp (§2.3).
+   Còn lại ô [1.6] — chạy đầy đủ 2343 ảnh, khoảng 15–30 phút — mới đủ số liệu chốt
+   GATE 1 và trả lời câu hỏi còn để mở ở §2.3 (lớp 1 có thật sự vắng mặt không).

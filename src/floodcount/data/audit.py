@@ -13,6 +13,11 @@ Trả lời bằng SỐ LIỆU hai câu hỏi phải chốt trước khi sang Ph
      Nếu nhiều component có diện tích > 3x trung vị thì nghi đã bị gộp, phải tách
      bằng distance transform + watershed.
 
+CẢ HAI KẾT LUẬN ĐỀU TÍNH TRÊN TẬP ĐÃ LỌC NHIỄU (component có cạnh nhỏ nhất >=
+`min_side_px`). Mask FloodNet có vô số đốm vài pixel do lỗi gán nhãn; để lẫn thì
+percentile 5 tụt xuống 1px và ta kết luận "phải cắt tile" vì RÁC, trong khi nhà
+thật có cạnh nhỏ nhất trung vị hàng trăm pixel. Gặp thật ngày 30/09/2026.
+
 Nguyên tắc: KHÔNG đoán. Cấu trúc zip, giá trị mask, kích thước ảnh đều đọc từ dữ
 liệu thật rồi mới kết luận. Chỗ nào chưa chắc thì in ra cho người dùng kiểm.
 
@@ -427,19 +432,38 @@ def tong_hop(ds_ban_ghi, classes, decisions, preprocess):
             continue
 
         trung_vi_dt = float(np.median(dt))
+
+        # --- Lọc nhiễu trước khi kết luận về tile ---
+        # Mask FloodNet có vô số đốm vài pixel (lỗi gán nhãn). Nếu để lẫn, percentile
+        # 5 của cạnh nhỏ nhất bị kéo xuống 1px và script kết luận "phải cắt tile" —
+        # trong khi nhà thật có cạnh nhỏ nhất trung vị hàng trăm pixel. Tức là quyết
+        # định về độ phân giải lại do rác quyết định. Đã gặp thật ngày 30/09/2026.
+        #
+        # Lọc theo CẠNH nhỏ nhất chứ không theo diện tích: một mảng 1x500 pixel có
+        # diện tích lớn hơn ngưỡng nhưng vẫn là vệt rác, không phải nhà.
+        loc = c >= decisions["min_side_px"]
+        c_loc, dt_loc = c[loc], dt[loc]
+
         ket_qua["lop"][ten_lop] = {
             "gia_tri_mask": gia_tri_lop,
             "so_box": int(len(c)),
+            "so_box_loc": int(len(c_loc)),
+            "so_box_nhieu": int(len(c) - len(c_loc)),
             "box_moi_anh_trung_binh": round(float(np.mean(box_moi_anh[ten_lop])), 2),
             "box_moi_anh_lon_nhat": int(np.max(box_moi_anh[ten_lop])),
+            # Số liệu thô, giữ lại để đối chiếu chứ KHÔNG dùng ra quyết định
             "canh_nho_nhat_p5": float(np.percentile(c, 5)),
             "canh_nho_nhat_p50": float(np.percentile(c, 50)),
             "canh_nho_nhat_p95": float(np.percentile(c, 95)),
+            # Số liệu đã lọc nhiễu — đây mới là căn cứ quyết định tiling
+            "canh_nho_nhat_p5_loc": float(np.percentile(c_loc, 5)) if len(c_loc) else None,
+            "canh_nho_nhat_p50_loc": float(np.percentile(c_loc, 50)) if len(c_loc) else None,
             "dien_tich_p1": float(np.percentile(dt, 1)),
             "dien_tich_p5": float(np.percentile(dt, 5)),
             "dien_tich_p50": trung_vi_dt,
             "dien_tich_p95": float(np.percentile(dt, 95)),
-            "so_box_to_bat_thuong": int((dt > decisions["area_outlier_ratio"] * trung_vi_dt).sum()),
+            "so_box_to_bat_thuong": int((dt_loc > decisions["area_outlier_ratio"] * trung_vi_dt).sum())
+            if len(dt_loc) else 0,
         }
 
     ket_qua["ket_luan"] = ket_luan(ket_qua, decisions, preprocess)
@@ -449,38 +473,55 @@ def tong_hop(ds_ban_ghi, classes, decisions, preprocess):
 def ket_luan(kq, decisions, preprocess):
     """So số liệu với ngưỡng đã định TRƯỚC trong config để ra quyết định."""
     kl = {}
+    min_side = decisions["min_side_px"]
+
+    # --- 0. Lớp được cấu hình nhưng KHÔNG có pixel nào trong toàn bộ dữ liệu ---
+    # Kiểm việc này TRƯỚC mọi thứ khác. Nếu lớp "nhà ngập" không tồn tại ở đâu thì
+    # mọi kết luận phía dưới đều vô nghĩa và đồ án không train được — phải la lên
+    # thật to, chứ để lọt vào báo cáo dưới dạng một dòng "so_box = 0" thì rất dễ
+    # đọc lướt qua. (Không có box nào <=> không có pixel nào: pixel nào cũng tạo
+    # thành một component.)
+    kl["lop_khong_co_pixel"] = [
+        f"{ten_lop} (giá trị mask {v['gia_tri_mask']})"
+        for ten_lop, v in kq["lop"].items() if not v.get("so_box")]
 
     # --- 1. Tiling? ---
-    p5_theo_lop = {t: v["canh_nho_nhat_p5"] for t, v in kq["lop"].items() if v.get("so_box")}
+    # Dùng số liệu ĐÃ LỌC NHIỄU. Đốm vài pixel kéo percentile 5 xuống 1px và làm
+    # script kết luận phải cắt tile, trong khi nhà thật to gấp trăm lần.
+    p5_theo_lop = {t: v["canh_nho_nhat_p5_loc"] for t, v in kq["lop"].items()
+                   if v.get("canh_nho_nhat_p5_loc") is not None}
     if p5_theo_lop:
         p5 = min(p5_theo_lop.values())
         kl["canh_box_p5_nho_nhat"] = p5
         kl["can_tiling"] = bool(p5 < decisions["min_box_side_p5_ok"])
-        kl["ly_do_tiling"] = (f"percentile 5 cạnh box nhỏ nhất sau resize = {p5:.1f}px, "
-                              f"ngưỡng = {decisions['min_box_side_p5_ok']}px")
+        kl["ly_do_tiling"] = (
+            f"percentile 5 cạnh box nhỏ nhất sau resize, đã bỏ đốm < {min_side}px, "
+            f"= {p5:.1f}px; ngưỡng = {decisions['min_box_side_p5_ok']}px")
 
     # --- 2. Tách nhà dính? ---
+    # Cũng tính trên tập đã lọc: đốm rác không thể là "nhà bị gộp".
     tong_to = sum(v.get("so_box_to_bat_thuong", 0) for v in kq["lop"].values())
-    tong_box = sum(v.get("so_box", 0) for v in kq["lop"].values())
+    tong_box = sum(v.get("so_box_loc", 0) for v in kq["lop"].values())
     ty_le_to = tong_to / tong_box if tong_box else 0.0
     kl["so_box_to_bat_thuong"] = tong_to
+    kl["so_box_dung_de_ket_luan"] = tong_box
     kl["ty_le_box_to_bat_thuong"] = round(ty_le_to, 4)
     # Mốc 5%: dưới mức đó coi như đuôi phân bố bình thường của diện tích nhà,
     # chưa đáng đánh đổi bằng việc thêm cả một bước watershed vào pipeline.
     kl["can_tach_nha_dinh"] = bool(ty_le_to > 0.05)
-    kl["ly_do_tach"] = (f"{tong_to}/{tong_box} box ({ty_le_to:.1%}) có diện tích > "
-                        f"{decisions['area_outlier_ratio']}x trung vị")
+    # Nói rõ "đã lọc" trong câu kết luận: mẫu số ở đây nhỏ hơn cột "Số box" trong
+    # bảng, người đọc đối chiếu hai chỗ mà không thấy giải thích sẽ tưởng script sai.
+    kl["ly_do_tach"] = (f"{tong_to}/{tong_box} box đã lọc nhiễu ({ty_le_to:.1%}) có "
+                        f"diện tích > {decisions['area_outlier_ratio']}x trung vị")
 
     # --- 3. min_area gợi ý ---
-    # Lấy percentile 1 của diện tích, tức chỉ cắt bỏ 1% nhỏ nhất — đủ để dọn các
-    # đốm nhiễu vài pixel mà không cắt nhầm nhà thật. Lấy min giữa hai lớp để
-    # không lớp nào bị cắt oan. Làm tròn chục cho dễ đọc.
-    p1_theo_lop = [v["dien_tich_p1"] for v in kq["lop"].values() if v.get("so_box")]
-    if p1_theo_lop:
-        goi_y = max(16, int(round(min(p1_theo_lop) / 10) * 10))
-        kl["min_area_goi_y"] = goi_y
-        kl["ly_do_min_area"] = (f"percentile 1 diện tích nhỏ nhất giữa hai lớp = "
-                                f"{min(p1_theo_lop):.0f}px, làm tròn thành {goi_y}px")
+    # Đây là LỰA CHỌN THIẾT KẾ, không phải số đo: một nhà nhỏ hơn min_side x min_side
+    # pixel ở cạnh dài target_long_side thì mắt người cũng không nhận ra, giữ lại
+    # chỉ thêm rác cho cả lúc train lẫn lúc đếm. Lấy đúng bình phương của min_side.
+    kl["min_area_goi_y"] = min_side ** 2
+    kl["ly_do_min_area"] = (
+        f"cạnh {min_side}px là mức nhỏ nhất còn nhận ra một căn nhà ở cạnh dài "
+        f"{preprocess['target_long_side']}px -> diện tích tối thiểu {min_side ** 2}px")
     kl["min_area_dang_dung"] = preprocess["min_area"]
 
     return kl
@@ -489,8 +530,22 @@ def ket_luan(kq, decisions, preprocess):
 def ghi_bao_cao(kq, duong_dan):
     """Ghi báo cáo markdown (để dán thẳng vào docs/NOTES.md) và trả về nội dung."""
     d = ["# Báo cáo EDA — Phase 1\n",
-         f"Tổng số ảnh đã xử lý: **{kq['so_anh_tong']}**\n",
-         "## Kích thước ảnh gốc\n"]
+         f"Tổng số ảnh đã xử lý: **{kq['so_anh_tong']}**\n"]
+
+    # Cảnh báo đặt NGAY ĐẦU báo cáo, trước cả số liệu. Nếu lớp cần train không
+    # tồn tại trong dữ liệu thì không có con số nào phía dưới đáng đọc nữa.
+    if kq["ket_luan"].get("lop_khong_co_pixel"):
+        d += ["> ## ⚠️ CẢNH BÁO: có lớp không xuất hiện trong dữ liệu\n>",
+              "> Các lớp sau được khai báo trong config nhưng **không có pixel nào** "
+              "trong toàn bộ ảnh đã xử lý:\n>"]
+        for t in kq["ket_luan"]["lop_khong_co_pixel"]:
+            d.append(f"> - **{t}**")
+        d += [">",
+              "> Nếu đây là lớp bắt buộc phải có (ví dụ `flooded_building`) thì "
+              "**dừng lại, đừng train**: kiểm tra lại bảng lớp, hoặc chạy trên nhiều "
+              "ảnh hơn — mẫu nhỏ có thể chưa gặp lớp đó.\n"]
+
+    d += ["## Kích thước ảnh gốc\n"]
     for k, n in kq["kich_thuoc_goc"].items():
         d.append(f"- `{k}`: {n} ảnh")
 
@@ -501,17 +556,23 @@ def ghi_bao_cao(kq, duong_dan):
         d.append(f"| {g} | {c:,} | {c / tong_px:.4%} |")
 
     d += ["", "## Thống kê theo lớp\n",
-          "| Lớp | Giá trị mask | Số box | Box/ảnh TB | Box/ảnh max "
-          "| Cạnh nhỏ nhất p5 | p50 | p95 | Diện tích p50 | Box to bất thường |",
-          "|---|---|---|---|---|---|---|---|---|---|"]
+          "Cột **p5 đã lọc** là con số dùng để quyết định tiling: đã bỏ các đốm nhỏ "
+          "hơn `min_side_px`. Cột **p5 thô** giữ lại để thấy rõ mức nhiễu gán nhãn "
+          "trong dữ liệu.\n",
+          "| Lớp | Giá trị mask | Số box | Bỏ do nhiễu | Box/ảnh TB | Box/ảnh max "
+          "| p5 đã lọc | p50 đã lọc | p5 thô | Diện tích p50 | Box to bất thường |",
+          "|---|---|---|---|---|---|---|---|---|---|---|"]
     for ten_lop, v in kq["lop"].items():
         if not v.get("so_box"):
-            d.append(f"| {ten_lop} | {v.get('gia_tri_mask', '?')} | 0 | | | | | | | |")
+            d.append(f"| {ten_lop} | {v.get('gia_tri_mask', '?')} | 0 | | | | | | | | |")
             continue
+        p5_loc = f"{v['canh_nho_nhat_p5_loc']:.1f}" if v.get("canh_nho_nhat_p5_loc") is not None else "—"
+        p50_loc = f"{v['canh_nho_nhat_p50_loc']:.1f}" if v.get("canh_nho_nhat_p50_loc") is not None else "—"
         d.append(f"| {ten_lop} | {v['gia_tri_mask']} | {v['so_box']:,} "
+                 f"| {v['so_box_nhieu']:,} "
                  f"| {v['box_moi_anh_trung_binh']} | {v['box_moi_anh_lon_nhat']} "
-                 f"| {v['canh_nho_nhat_p5']:.1f} | {v['canh_nho_nhat_p50']:.1f} "
-                 f"| {v['canh_nho_nhat_p95']:.1f} | {v['dien_tich_p50']:.0f} "
+                 f"| {p5_loc} | {p50_loc} "
+                 f"| {v['canh_nho_nhat_p5']:.1f} | {v['dien_tich_p50']:.0f} "
                  f"| {v['so_box_to_bat_thuong']} |")
 
     if kq["kiem_tra_nuoc"]:
