@@ -397,8 +397,10 @@ Các số dưới đây chỉ là **kỳ vọng** để đối chiếu, chưa ph
 - [x] Tập **test có nhãn hay không** → **CÓ**, 448 mask. Giữ nguyên split gốc. (đo 30/09/2026)
 - [x] Ảnh và mask có cùng kích thước không → **cùng 4000×3000**, không lệch. (đo 30/09/2026)
 - [x] Số ảnh mỗi split, số pixel mỗi lớp, số ảnh có/không có nhà ngập
-      → **1445/450/448 cặp**; đủ **cả 10 giá trị mask**; xem bảng đầy đủ ở §2.4.
-      (đo 30/09/2026, chạy đầy đủ 2343 ảnh)
+      → **1445/450/448 cặp**; đủ **cả 10 giá trị mask**; **chỉ 245 ảnh (10,5%) có nhà
+      ngập** và 880 ảnh (37,6%) có nhà không ngập — dữ liệu thưa hơn nhiều so với dự
+      đoán, kéo theo hệ quả cho cả Phase 3 (lấy mẫu) lẫn Phase 5 (cách chấm điểm).
+      Bảng đầy đủ ở §2.4. (đo 30/09/2026, chạy đầy đủ 2343 ảnh)
 - [x] Phân bố diện tích nhà và **cạnh box nhỏ nhất sau khi resize** → đã đo, xem §2.4.
       Kết quả: p5 (đã lọc nhiễu) = **28.0px** < 32px → theo đúng quy tắc đã chốt trong
       plan thì **CẦN cắt tile**. Đây là kết quả SÁT NGƯỠNG (28 so với 32) và toàn bộ
@@ -507,12 +509,30 @@ lại, tức cùng một căn nhà cho ra box nhỏ hơn 13%. Không sai, nhưng
 **đúng**, và 9 ảnh mẫu trước đó chỉ là không đại diện. Không phải dừng lại tra bảng lớp.
 Tỉ lệ theo từng split cũng cân (lớp 1: 1,79% train / 1,99% val / 1,87% test).
 
+**⚠️ Phát hiện quan trọng nhất của lần chạy này — dữ liệu cực kỳ thưa ở mức ảnh:**
+
+| Lớp | Ảnh CÓ ít nhất 1 nhà | Ảnh KHÔNG có nhà nào | Box mỗi ảnh CÓ nhà |
+|---|---|---|---|
+| flooded_building | **245 (10,5%)** | 2098 (89,5%) | 14,4 |
+| non_flooded_building | 880 (37,6%) | 1463 (62,4%) | 4,5 |
+
+**89,5% số ảnh không có một căn nhà ngập nào.** Con số "box/ảnh TB = 1,51" ở bảng dưới
+là trung bình trên *toàn bộ* 2343 ảnh; trên những ảnh thật sự có nhà ngập thì là 14,4
+box/ảnh. Hai mặt của cùng một dữ liệu, nhưng mặt thứ hai mới là mặt quyết định cách
+train và cách chấm điểm:
+
+- Chỉ ~150 ảnh train có nhà ngập (10,5% của 1445) — model sẽ **đói dương tính**. Phase 3
+  phải cân nhắc `RepeatFactorTrainingDataset` hoặc lấy mẫu cân bằng, đừng để mặc định
+  lấy đều (mỗi batch ~10% ảnh có lớp cần học).
+- **Chấm điểm đếm nhà không được dùng "accuracy"**: đoán 0 cho mọi ảnh đã đúng 89,5%.
+  Phase 5 phải dùng MAE/RMSE trên số nhà mỗi ảnh, và báo cáo riêng trên tập ảnh CÓ nhà.
+
 **Thống kê box (sau resize cạnh dài 1536, đã bỏ đốm nhiễu < 8px):**
 
-| Lớp | Số box | Bỏ do nhiễu | Box/ảnh TB | Max | p5 đã lọc | p50 đã lọc | p5 thô | DT p50 đã lọc | Box to bất thường |
-|---|---|---|---|---|---|---|---|---|---|
-| flooded_building | 3534 | 433 (10,9%) | 1,51 | 45 | 44,0 | 166,0 | 1,0 | 17.987 | 14 (0,5%) |
-| non_flooded_building | 3985 | 744 (15,7%) | 1,70 | 54 | **28,0** | 148,0 | 1,0 | 12.285 | 1096 (33,8%) |
+| Lớp | Số box | Bỏ do nhiễu | Box/ảnh TB | Max | p5 đã lọc | p50 đã lọc | p5 thô | DT p50 thô | DT p50 đã lọc | Box to bất thường |
+|---|---|---|---|---|---|---|---|---|---|---|
+| flooded_building | 3534 | 433 (10,9%) | 1,51 | 45 | 44,0 | 166,0 | 1,0 | 17.987 | 19.580 | 10 (0,3%) |
+| non_flooded_building | 3985 | 744 (15,7%) | 1,70 | 54 | **28,0** | 148,0 | 1,0 | 12.285 | 20.618 | 747 (23,0%) |
 
 Đọc bảng này:
 
@@ -520,6 +540,9 @@ Tỉ lệ theo từng split cũng cân (lớp 1: 1,79% train / 1,99% val / 1,87%
   có p5 = 1,0px và mọi kết luận đều do rác quyết định — đúng lỗi 1 ở §2.3.
 - Nhà thật **rất to so với ngưỡng**: p50 = 148–166px, gấp ~5 lần mốc 32px. Chỉ có đuôi
   nhỏ nhất mới đáng lo.
+- Hai cột `DT p50` cho thấy mức thiệt hại của lỗi 3: với `non_flooded_building`, trung vị
+  thô (12.285) **thấp hơn 40%** so với trung vị đã lọc (20.618) — mốc 3× vì thế bị hạ
+  xuống chỉ còn ~60% giá trị đúng.
 
 **Kết luận tự động của công cụ và đánh giá của tôi:**
 
@@ -527,23 +550,25 @@ Tỉ lệ theo từng split cũng cân (lớp 1: 1,79% train / 1,99% val / 1,87%
    cần bàn: p5 = 28,0px < 32px, mà **toàn bộ phần thiếu đến từ `non_flooded_building`**
    (`flooded_building` một mình là 44,0px, vượt ngưỡng thoải mái). Nghĩa là quyết định
    độ phân giải của cả đồ án đang do một lớp quyết định, và chỉ vì 28 < 32 đúng 4px.
-2. **Tách nhà dính: số liệu nói CÓ (17,5%) — nhưng TÔI CHO RẰNG CHỈ SỐ NÀY KHÔNG ĐO
-   CHUYỆN GỘP NHÀ.** Lý do: `flooded_building` chỉ 0,5% box bị gắn cờ còn
-   `non_flooded_building` tới 33,8% — chênh **67 lần**. Nếu là nhà dính nhau thật thì
-   hai lớp phải na ná nhau (nhà kề nhà thì kề như nhau, ngập hay không ngập không ảnh
-   hưởng). Chênh lệch cỡ đó nghĩa là chỉ số đang đo **phân bố kích thước nhà** (nhà ống
-   vs nhà xưởng), không đo chuyện gộp. Thêm nữa, bản đầu của công cụ lấy trung vị của
-   *tất cả* box làm mốc 3×, mà đốm nhiễu kéo trung vị xuống → mốc bị hạ → càng nhiều box
-   to bị gắn cờ (đã sửa, xem lỗi 3 bên dưới).
+2. **Tách nhà dính: số liệu nói CÓ (11,9%, sau khi sửa lỗi 3) — nhưng TÔI CHO RẰNG CHỈ
+   SỐ NÀY KHÔNG ĐO CHUYỆN GỘP NHÀ.** Lý do: `flooded_building` chỉ 0,3% box bị gắn cờ
+   còn `non_flooded_building` tới 23,0% — chênh **75 lần**. Nếu là nhà dính nhau thật
+   thì hai lớp phải na ná nhau (nhà kề nhà thì kề như nhau, ngập hay không ngập không
+   ảnh hưởng gì). Chênh lệch cỡ đó nghĩa là chỉ số đang đo **phân bố kích thước nhà**
+   (nhà ống vs nhà xưởng), không đo chuyện gộp. Sửa lỗi 3 làm con số tổng giảm từ 17,5%
+   xuống 11,9% nhưng **độ lệch giữa hai lớp thì vẫn nguyên** — càng chắc rằng nó nằm
+   trong bản chất dữ liệu, không phải trong cách tính.
 3. **`min_area` = 64** (bằng `min_side_px²`) — giữ nguyên như config.
 
 **Lỗi thứ ba lộ ra ở lần chạy này — mốc "3× trung vị" tính sai.**
 
 Tử số đã lọc nhiễu (chỉ đem box to đi so) nhưng **mẫu số/mốc vẫn lấy trung vị của tất cả
 box**, kể cả 744 đốm của `non_flooded_building`. Đốm kéo trung vị xuống, hạ thấp mốc 3×,
-và mọi căn nhà to thật đều vượt mốc. Đây là lời giải thích trực tiếp cho con số 33,8%.
-Đã sửa: mốc tính trên trung vị **đã lọc**; có test riêng (`tests/test_audit.py` mục 14)
-dựng đúng ca "2 nhà to + 6 đốm" — lấy trung vị thô thì kết luận đảo ngược thành "CÓ".
+và mọi căn nhà to thật đều vượt mốc. Mức thiệt hại đo được: trung vị thô của
+`non_flooded_building` là 12.285 còn trung vị đã lọc là 20.618 (**lệch 40%**), và số box
+bị gắn cờ tụt từ 1096 xuống 747 khi sửa. Đã sửa: mốc tính trên trung vị **đã lọc**; có
+test riêng (`tests/test_audit.py` mục 14) dựng đúng ca "2 nhà to + 6 đốm" — lấy trung vị
+thô thì kết luận đảo ngược thành "CÓ".
 
 **Kiểm chứng "nhà ngập nằm cạnh nước" — yếu, chưa dùng được:**
 
@@ -552,7 +577,7 @@ dựng đúng ca "2 nhà to + 6 đốm" — lấy trung vị thô thì kết lu�
 | flooded_building | 18 | 15 | 83,3% |
 | non_flooded_building | 67 | 44 | 65,7% |
 
-Hướng đúng (nhà ngập chạm nước nhiều hơn) nhưng **mẫu quá nhỏ** (18 component!) và tỉ lệ
+Hướng đúng (nhà ngập chạm nước nhiều hơn) nhưng **mẫu quá nhỏ** (27 ảnh, 18 component) và tỉ lệ
 bị pha loãng vì tính trên mọi component kể cả đốm nhiễu chưa lọc — đốm nhiễu hiếm khi
 chạm nước nên tỉ lệ thật phải cao hơn bảng này. Đây là lý do con số "~22%" ở §2.1 không
 tái lập được. Muốn trích dẫn thì phải đo lại trên mẫu lớn hơn và chỉ trên box đã lọc.
