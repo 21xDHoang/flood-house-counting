@@ -592,6 +592,15 @@ def ket_luan(kq, decisions, preprocess):
         f"{preprocess['target_long_side']}px -> diện tích tối thiểu {min_side ** 2}px")
     kl["min_area_dang_dung"] = preprocess["min_area"]
 
+    # --- 4. Quyết định người dùng đã chốt ở GATE 1 (ghi trong config) ---
+    # Ngưỡng ở trên là MÁY tự tính; đây mới là thứ đồ án LÀM. Hai bên có thể khác
+    # nhau (ngưỡng là quy tắc chung, quyết định có thêm bằng chứng nhìn bằng mắt và
+    # ngân sách thời gian train) — nên in cả hai. Báo cáo chỉ in "Cắt tile: CÓ" mà
+    # code lại không cắt tile thì người đọc sẽ tưởng có chỗ nào đó bị bỏ quên.
+    for khoa, ten in (("cat_tile", "cắt tile"), ("tach_nha_dinh", "tách nhà dính")):
+        if khoa in decisions:
+            kl[f"chot_{khoa}"] = bool(decisions[khoa])
+
     return kl
 
 
@@ -712,6 +721,20 @@ def ghi_bao_cao(kq, duong_dan):
     if "min_area_goi_y" in kl:
         d.append(f"- **min_area đề xuất: {kl['min_area_goi_y']}** — {kl['ly_do_min_area']} "
                  f"(config đang để {kl['min_area_dang_dung']})")
+
+    # Quyết định đã chốt ở GATE 1. Chỉ nói "khác ngưỡng" khi thật sự khác — nói câu
+    # đó vô điều kiện thì nó thành nhiễu, và lần sau không ai đọc nữa.
+    for khoa, nhan, nguong in (("cat_tile", "Cắt tile", kl.get("can_tiling")),
+                               ("tach_nha_dinh", "Tách nhà dính",
+                                kl.get("can_tach_nha_dinh"))):
+        if f"chot_{khoa}" not in kl:
+            continue
+        chot = kl[f"chot_{khoa}"]
+        d.append(f"- **Chốt của đồ án: {'CÓ' if chot else 'KHÔNG'} {nhan.lower()}** "
+                 f"(lý do ghi trong `configs/data.yaml`)")
+        if nguong is not None and chot != nguong:
+            d.append(f"  - ⚠️ Khác với ngưỡng tự động ở trên "
+                     f"({'CÓ' if nguong else 'KHÔNG'}) — có chủ ý, không phải lỗi.")
     d.append("")
 
     noi_dung = "\n".join(d)

@@ -23,8 +23,11 @@ paths:
 # Tiền xử lý — Phase 2 sẽ dùng đúng các giá trị này
 # ---------------------------------------------------------------------------
 preprocess:
-  # Cạnh dài sau khi resize. 1536 là mặc định đã chốt trong plan muc 3.
-  # Phase 1 kiểm tra bằng số liệu xem có phải đổi không (xem decision bên dưới).
+  # Cạnh dài sau khi resize. 1536 là mặc định đã chốt trong plan muc 3, và GATE 1
+  # (30/09/2026) giữ nguyên sau khi đo: trung vị cạnh nhỏ nhất của nhà là 148-166px,
+  # gấp ~5 lần ngưỡng 32px, nên hạ hay nâng độ phân giải đều không đáng so với giá
+  # phải trả bằng VRAM trên T4. Lưu ý dữ liệu có HAI cỡ ảnh gốc nên tỉ lệ resize
+  # không đồng nhất (0,3840 và 0,3345 — NOTES §2.4).
   target_long_side: 1536
 
   # Diện tích nhỏ nhất (pixel, tính SAU resize) để coi là nhà thật, lọc nhiễu.
@@ -63,9 +66,41 @@ decisions:
   # (px) => KHÔNG cần cắt tile.
   min_box_side_p5_ok: 32
 
-  # Component có diện tích > hệ số này x trung vị => nghi nhiều nhà bị gộp làm một
-  # => phải bật tách bằng distance transform + watershed.
+  # Component có diện tích > hệ số này x trung vị ĐÃ LỌC NHIỄU => nghi nhiều nhà bị
+  # gộp làm một. Mốc phải tính trên trung vị đã lọc: lấy trung vị thô thì đốm nhiễu
+  # kéo mốc xuống 40% và mọi nhà to thật đều bị gắn cờ (gặp thật 30/09/2026).
   area_outlier_ratio: 3.0
+
+  # ---------------------------------------------------------------------------
+  # CHỐT CỦA GATE 1 — 30/09/2026, trên số liệu chạy đầy đủ 2343 ảnh (NOTES §2.4).
+  # Đây là thứ đồ án LÀM; các ngưỡng ở trên chỉ là máy tự tính. Chỗ nào hai bên
+  # khác nhau thì báo cáo EDA in rõ lý do, để người đọc không thấy mâu thuẫn.
+  # ---------------------------------------------------------------------------
+
+  # Ngưỡng tự động nói "CÓ" (p5 = 28,0px < 32px) — đồ án chốt KHÔNG, vì:
+  #   1. Sát ngưỡng đúng 4px, và TOÀN BỘ phần thiếu đến từ non_flooded_building
+  #      (flooded_building một mình là 44,0px, vượt thoải mái). Tức quyết định độ
+  #      phân giải của cả đồ án đang do một lớp quyết định.
+  #   2. 28px = 3,5 ô ở tầng stride-8 của FPN — vẫn nằm trong vùng phát hiện được,
+  #      không phải vùng chết. Vùng chết là dưới ~16px (2 ô).
+  #   3. Cắt tile 2x2 làm dataset và thời gian train tăng 4 lần trên T4, cộng thêm
+  #      code ghép box khi suy luận — đắt so với 5% số box bị ảnh hưởng. Dữ liệu
+  #      lại vốn đã thưa (chỉ 10,5% ảnh có nhà ngập), cắt tile làm tỉ lệ đó thưa thêm.
+  #   4. Quyết định này chốt TRƯỚC khi train, không phải sau khi xem mAP — giữ đúng
+  #      tinh thần "không chỉnh tham số sau khi thấy kết quả" của plan.
+  # Đổi lại: Phase 6 phải có một thí nghiệm so tiled/không-tiled trên val. Nếu phân
+  # tích lỗi cho thấy nhà nhỏ là nguồn lỗi chính thì đó là căn cứ để bật lại.
+  cat_tile: false
+
+  # Ngưỡng tự động nói "CÓ" (11,9% box > 3x trung vị) — đồ án chốt KHÔNG, vì:
+  #   1. Người dùng đã xem 30 ảnh overlay: các box viền TÍM đều là MỘT căn nhà to,
+  #      không phải nhiều căn dính nhau. Đây là bằng chứng trực tiếp, mạnh hơn chỉ số.
+  #   2. Chỉ số lệch giữa hai lớp tới 75 lần (0,3% so với 23,0%). Nhà kề nhà thì kề
+  #      như nhau, ngập hay không ngập không ảnh hưởng — nên chênh lệch cỡ đó nghĩa
+  #      là chỉ số đang đo PHÂN BỐ KÍCH THƯỚC nhà (nhà ống vs nhà xưởng), không đo
+  #      chuyện gộp nhà.
+  # Thêm cả bước watershed là thêm một nguồn sai số vào pipeline mà không có căn cứ.
+  tach_nha_dinh: false
 
 # ---------------------------------------------------------------------------
 # Khảo sát

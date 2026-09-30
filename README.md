@@ -105,7 +105,7 @@ bất thường, nghi bị gộp**).
 | `src/floodcount/infer/` | `predict.py` (ảnh → box + số đếm), `tta_wbf.py` |
 | `scripts/` | Lệnh CLI mỏng gọi vào `src/` |
 | `notebooks/` | Notebook **mỏng** cho Colab — chỉ gọi script, không chứa logic |
-| `tests/` | Test chạy trên máy CPU, không cần GPU và không cần dataset thật (`test_audit.py`: 99 assertion trên zip giả có cả bẫy ColorMasks) |
+| `tests/` | Test chạy trên máy CPU, không cần GPU và không cần dataset thật (`test_audit.py`: 103 assertion trên zip giả có cả bẫy ColorMasks) |
 | `outputs/` | Ảnh minh hoạ, overlay, biểu đồ (không đưa lên git) |
 | `requirements-colab.txt` | Bản ghi các gói cài thêm vào Colab (đọc phần đầu file trước khi dùng) |
 

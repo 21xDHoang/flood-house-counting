@@ -582,8 +582,35 @@ bị pha loãng vì tính trên mọi component kể cả đốm nhiễu chưa l
 chạm nước nên tỉ lệ thật phải cao hơn bảng này. Đây là lý do con số "~22%" ở §2.1 không
 tái lập được. Muốn trích dẫn thì phải đo lại trên mẫu lớn hơn và chỉ trên box đã lọc.
 
-**Còn thiếu để chốt GATE 1:** nhận xét **bằng mắt** 30 ảnh trong `runs/eda/overlay/` —
-cụ thể là các box viền TÍM, để phân biệt "một căn nhà to" với "nhiều căn bị gộp".
+### 2.5 GATE 1 — kiểm bằng mắt và quyết định đã chốt (30/09/2026)
+
+Người dùng mở 30 ảnh trong `runs/eda/overlay/` soi bằng mắt và trả lời hai câu:
+
+1. **Box đỏ/xanh có khớp nhà không?** → **Có.** Xác nhận chiều mask → component → box
+   là đúng, không bị lệch toạ độ. Đây là phép kiểm bù cho việc `audit.py` chỉ đọc mask
+   chứ không đọc lại ảnh.
+2. **Box viền TÍM là một căn nhà to hay nhiều căn dính nhau?** → **Một căn nhà to.**
+   Đây là bằng chứng **trực tiếp** phủ định giả thuyết "nhà bị gộp" — mạnh hơn chỉ số
+   thống kê, vì chỉ số chỉ nói "box to gấp 3 lần trung vị" chứ không nói được bên trong
+   box có mấy căn.
+
+**Quyết định của GATE 1 — đã ghi vào `configs/data.yaml`, mục `decisions`:**
+
+| Tham số | Chốt | Ngưỡng tự động nói | Lý do |
+|---|---|---|---|
+| `target_long_side` | **1536** | — | Trung vị nhà 148–166px, gấp ~5 lần mốc 32px; tăng/giảm đều không đáng so với VRAM trên T4 |
+| `min_area` | **64** | — | Bằng `min_side_px²` để "nhà hợp lệ" chỉ có một định nghĩa |
+| `cat_tile` | **false (KHÔNG)** | CÓ | Sát ngưỡng đúng 4px và chỉ do một lớp; 28px = 3,5 ô ở stride-8 vẫn phát hiện được; cắt tile đắt gấp 4 lần mà dữ liệu vốn đã thưa |
+| `tach_nha_dinh` | **false (KHÔNG)** | CÓ | Người dùng đã soi 30 ảnh: box tím là một căn nhà to. Chỉ số lệch 75 lần giữa hai lớp cũng cho thấy nó đo phân bố kích thước, không đo chuyện gộp |
+
+Hai chỗ lệch ngưỡng là **có chủ ý** và báo cáo EDA in rõ ("Khác với ngưỡng tự động — có
+chủ ý, không phải lỗi"), để người đọc không tưởng có chỗ nào bị bỏ quên. Cả hai đều được
+quyết **trước khi train**, không phải sau khi xem mAP — giữ đúng tinh thần "không chỉnh
+tham số sau khi thấy kết quả" của plan.
+
+**Đổi lại, Phase 6 phải trả nợ:** một thí nghiệm so **tiled / không-tiled** trên val. Nếu
+phân tích lỗi cho thấy nhà nhỏ là nguồn lỗi chính thì đó chính là căn cứ để bật lại
+`cat_tile: true` — và khi đó đồ án có số liệu để bảo vệ, thay vì chỉ có một quy tắc.
 
 ---
 
@@ -593,18 +620,17 @@ cụ thể là các box viền TÍM, để phân biệt "một căn nhà to" v�
    **Xong 30/09/2026** — xem §1.5 và §1.6.
 2. Repo đã đẩy lên GitHub: **https://github.com/21xDHoang/flood-house-counting**
    (public, nhánh `main`). Colab clone repo này về `/content` ở đầu mỗi phiên.
-3. **Phase 1 — đã chạy ĐẦY ĐỦ 2343 ảnh (30/09/2026), số liệu ở §2.4. Đang chờ xác
-   nhận GATE 1.** Đã đẩy lên GitHub:
+3. **Phase 1 — XONG, GATE 1 ĐÃ CHỐT (30/09/2026).** Số liệu ở §2.4, quyết định và
+   phép kiểm bằng mắt ở §2.5. Đã đẩy lên GitHub:
    - `configs/data.yaml` — toàn bộ tham số (đường dẫn, ngưỡng quyết định, tham số EDA)
+     **+ khối "CHỐT CỦA GATE 1"** ghi 4 lý do cho mỗi quyết định
    - `src/floodcount/data/audit.py` — khảo sát mask thật, trả lời checklist §2.2
    - `scripts/audit.py` — CLI mỏng bọc quanh module trên
-   - `tests/test_audit.py` — 99 assertion trên zip giả có cả bẫy ColorMasks
+   - `tests/test_audit.py` — 103 assertion trên zip giả có cả bẫy ColorMasks
    - `notebooks/01_data_prep.ipynb` — notebook chạy trên Colab (không cần GPU)
 
-   **Việc của người dùng để chốt GATE 1:** mở `runs/eda/overlay/` (30 ảnh) xem bằng
-   mắt, mô tả các box viền TÍM — đó là dữ liệu duy nhất phân biệt được "một căn nhà
-   to" với "nhiều căn bị gộp", và là cơ sở để quyết định có làm watershed hay không.
+   Chạy lại [1.6] bây giờ rất nhanh (~2 phút) vì nó đọc lại `audit.jsonl` cũ thay vì
+   xử lý lại 2343 ảnh — dùng mỗi khi chỉ cần đổi phần báo cáo.
 
-   Ô [1.5] chạy thử và ô [1.6] chạy đầy đủ **đều đã xong**. Chạy lại [1.6] bây giờ rất
-   nhanh (~2 phút) vì nó đọc lại `audit.jsonl` cũ thay vì xử lý lại 2343 ảnh — dùng
-   mỗi khi chỉ cần đổi phần báo cáo.
+4. **Phase 2 (tiếp theo)** — chuyển mask → COCO cho hai lớp nhà, dùng đúng
+   `target_long_side: 1536`, `min_area: 64`, không cắt tile, không watershed.

@@ -166,8 +166,15 @@ def tao_zip_median(duong_dan_zip):
     return duong_dan_zip
 
 
-def tao_config_gia(duong_dan_yaml, zip_path, output_dir, work_dir):
-    """Config tối thiểu, trỏ vào dữ liệu giả. Dùng y hệt khoá của configs/data.yaml."""
+def tao_config_gia(duong_dan_yaml, zip_path, output_dir, work_dir, quyet_dinh=None):
+    """Config tối thiểu, trỏ vào dữ liệu giả. Dùng y hệt khoá của configs/data.yaml.
+
+    `quyet_dinh`: các quyết định GATE 1 ghi thêm vào mục `decisions`. Dùng để thử
+    phần báo cáo in "chốt của đồ án khác ngưỡng tự động" — mặc định không có, vì
+    phần lớn test muốn thấy báo cáo thuần số liệu.
+    """
+    dong_chot = "".join(f"  {k}: {'true' if v else 'false'}\n"
+                        for k, v in (quyet_dinh or {}).items())
     noi_dung = f"""
 paths:
   zip: {zip_path.replace(chr(92), '/')}
@@ -184,7 +191,7 @@ decisions:
   min_side_px: 8
   min_box_side_p5_ok: 32
   area_outlier_ratio: 3.0
-eda:
+{dong_chot}eda:
   num_overlays: 4
   seed: 42
   max_images: null
@@ -535,8 +542,12 @@ def main():
         zip_sach = tao_zip_sach(os.path.join(tmp, "sach.zip"))
         work_sach = os.path.join(tmp, "work_sach")
         output_sach = os.path.join(tmp, "eda_sach")
+        # Cố ý chốt NGƯỢC với ngưỡng tự động (ngưỡng nói KHÔNG cắt tile) để thử phần
+        # báo cáo in rõ chênh lệch. Không in ra thì người đọc EDA_REPORT.md thấy
+        # "Cắt tile: KHÔNG" mà code thì cắt tile, và tưởng có chỗ nào bị bỏ quên.
         config_sach = tao_config_gia(os.path.join(tmp, "sach.yaml"), zip_sach,
-                                     output_sach, work_sach)
+                                     output_sach, work_sach,
+                                     quyet_dinh={"cat_tile": True, "tach_nha_dinh": False})
         ma_sach, stdout_sach, stderr_sach = chay_audit(config_sach, work_sach)
         if ma_sach != 0:
             print(stdout_sach[-3000:])
@@ -571,6 +582,12 @@ def main():
         kiem("Số pixel mỗi giá trị mask theo split" not in bao_cao_sach,
              "chi mot split thi KHONG in bang theo split (lap lai bang tong)")
 
+        # Chốt của đồ án in kèm, và khi khác ngưỡng tự động thì phải nói rõ là có chủ ý.
+        kiem("Chốt của đồ án: CÓ cắt tile" in bao_cao_sach,
+             "bao cao in quyet dinh da chot o GATE 1, khong chi in nguong tu dong")
+        kiem("Khác với ngưỡng tự động" in bao_cao_sach,
+             "chot khac nguong thi phai noi ro la co y, khong phai loi")
+
         print("\n=== 13. configs/data.yaml THAT phai co du moi khoa audit.py doc ===")
         # File config thật chỉ được chạy trên Colab, mà vòng sửa-lỗi ở đó rất đắt
         # (một lần chạy là một lần chờ). Thiếu một khoá thì lỗi chỉ lộ ra ở đó, dưới
@@ -583,6 +600,9 @@ def main():
                 "preprocess.classes", "preprocess.water_value",
                 "decisions.min_side_px", "decisions.min_box_side_p5_ok",
                 "decisions.area_outlier_ratio",
+                # Hai khoá này là quyết định của GATE 1 — Phase 2 đọc chúng để biết
+                # có cắt tile hay không. Thiếu thì Phase 2 lặng lẽ dùng mặc định.
+                "decisions.cat_tile", "decisions.tach_nha_dinh",
                 "eda.num_overlays", "eda.seed", "eda.max_images", "eda.num_water_check"]:
             kiem(co_khoa(cfg_that, duong_dan_khoa),
                  f"configs/data.yaml co khoa {duong_dan_khoa}")
