@@ -254,6 +254,47 @@ Trên Colab vốn đã là UTF-8 nên bước này không đổi gì. Test mục
 `PYTHONIOENCODING=cp1252` rồi chạy `--help` để **giữ lỗi này không quay lại** —
 sau này thêm script mới thì chép luôn đoạn trên vào `main()`.
 
+### 1.8 Colab KHÔNG hiện stderr của tiến trình con — gặp thật 30/09/2026
+
+Triệu chứng người dùng gặp khi chạy ô `[1.5]` lần đầu:
+
+```
+Chạy: /usr/bin/python3 scripts/audit.py --config configs/data.yaml ...
+========================================================================
+========================================================================
+Mã thoát: 1 (0 là thành công)
+```
+
+Hai dòng `====` nằm sát nhau, **không có một dòng nào ở giữa**. Script thoát với
+mã 1 mà không nói gì.
+
+**Hai nguyên nhân chồng lên nhau, cả hai đều là lỗi thiết kế của mình:**
+
+1. **`print` đầu tiên nằm quá muộn.** Trong `audit.py`, dòng in băng-rôn ở sau
+   `open(args.config)`. File config mở không được → script thoát trước khi in
+   được gì → stdout trống trơn.
+2. **Colab chỉ nối `fd 1` của tiến trình con vào ô output.** `fd 2` (stderr) đi
+   thẳng vào log của máy chủ Jupyter, người dùng không nhìn thấy. Nên traceback
+   `FileNotFoundError` có được ném ra thật, nhưng **vô hình**.
+
+Đây là bẫy nguy hiểm vì "không có thông báo lỗi" trông giống hệt "script chạy
+xong không có gì để in" — mất hẳn manh mối để chẩn đoán.
+
+**Đã sửa, ba chỗ:**
+
+- `audit.py`: in băng-rôn **trước** khi mở config, và kiểm file config có tồn tại
+  không rồi in thông báo tiếng Việt rõ ràng (kèm gợi ý chạy lại ô `[1.3]`).
+  Nguyên tắc rút ra: **dòng in đầu tiên phải nằm trước mọi thứ có thể thất bại.**
+- Notebook: hai ô chạy đều truyền `stderr=subprocess.STDOUT` để gộp stderr của
+  tiến trình con vào fd 1. Vẫn giữ được log hiện dần theo thời gian thực, mà
+  traceback không biến mất nữa. **Ô chạy nào sau này thêm vào cũng phải có dòng này.**
+- Test mục 10 và 11 kiểm cả hai điều trên, để không tái phát.
+
+**Còn một lớp bẫy nữa ở notebook:** Colab chạy từng ô độc lập, nhảy thẳng xuống
+ô `[1.5]` mà chưa chạy ô `[1.1]` thì lỗi `NameError: name 'EDA_OUT' is not defined`
+— trông như lỗi code nhưng thật ra chỉ là chưa chạy ô cấu hình. Ba ô chạy nay đều
+tự kiểm và báo rõ phải chạy ô `[1.1]` trước.
+
 ---
 
 ## 2. Dataset FloodNet

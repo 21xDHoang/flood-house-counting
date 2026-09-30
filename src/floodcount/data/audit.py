@@ -538,6 +538,19 @@ def main():
                     help="Bỏ qua kết quả lần chạy trước, làm lại từ đầu")
     args = ap.parse_args()
 
+    # In băng-rôn TRƯỚC khi mở file config. Nếu để sau, một lỗi sớm (thiếu file
+    # config chẳng hạn) làm script thoát mà stdout TRỐNG TRƠN — nhìn vào chỉ thấy
+    # "mã thoát 1" mà không biết vì sao. Đúng lỗi đã gặp ngày 30/09/2026.
+    print("=" * 72)
+    print("KHẢO SÁT DỮ LIỆU FLOODNET — PHASE 1")
+    print("=" * 72)
+
+    if not os.path.exists(args.config):
+        print(f"[!] Không thấy file cấu hình:\n    {args.config}\n"
+              f"    Thường là repo clone về chưa có thư mục configs/. "
+              f"Chạy lại ô [1.3] trong notebook để lấy code mới nhất.")
+        raise SystemExit(1)
+
     with open(args.config, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
@@ -562,9 +575,6 @@ def main():
               f"    Kiểm tra Drive đã mount chưa, và đường dẫn trong {args.config}.")
         raise SystemExit(1)
 
-    print("=" * 72)
-    print("KHẢO SÁT DỮ LIỆU FLOODNET — PHASE 1")
-    print("=" * 72)
     print(f"zip     : {zip_path}")
     print(f"kết quả : {output_dir}")
     print(f"resize  : cạnh dài {target_long_side}px")

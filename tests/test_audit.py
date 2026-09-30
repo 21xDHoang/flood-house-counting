@@ -296,6 +296,21 @@ def main():
         kiem(ma_tra_ve5 != 0, "zip khong ton tai -> thoat voi ma khac 0")
         kiem("Không thấy file zip" in stdout5, "co thong bao ro rang ve file zip thieu")
 
+        # Lỗi gặp thật ngày 30/09/2026, tốn một vòng hỏi đáp mới tìm ra: thiếu file
+        # config làm script thoát với stdout TRỐNG TRƠN, vì dòng print đầu tiên nằm
+        # sau lệnh mở file. Trên Colab còn tệ hơn — traceback đi vào stderr của tiến
+        # trình con, mà Colab không hiện stderr của tiến trình con. Nhìn vào chỉ thấy
+        # "Mã thoát: 1" và không có manh mối nào.
+        config4 = os.path.join(tmp, "khong-co-file-nay.yaml")
+        ma_tra_ve6, stdout6, _ = chay_audit(config4, os.path.join(tmp, "work4"))
+        kiem(ma_tra_ve6 != 0, "thieu config -> thoat voi ma khac 0")
+        kiem(stdout6.strip() != "",
+             "thieu config -> VAN IN RA stdout (khong duoc im lang)")
+        kiem("Không thấy file cấu hình" in stdout6,
+             "thieu config -> noi ro thieu file nao")
+        kiem("configs" in stdout6,
+             "thieu config -> goi y chay lai o [1.3] de clone code moi")
+
         print("\n=== 11. Notebook 01 phai khop voi CLI cua audit.py ===")
         # Đây là loại lỗi chỉ lộ ra khi đã ngồi chờ trên Colab: notebook truyền cờ
         # mà script không có, hoặc ngược lại. Kiểm ngay trên máy cho rẻ.
@@ -305,6 +320,18 @@ def main():
             if c["cell_type"] == "code":
                 compile("".join(c["source"]), f"nb-cell-{i}", "exec")
         kiem(True, "moi o code cua notebook 01 compile duoc")
+
+        # Colab chỉ nối fd 1 của tiến trình con vào ô output; fd 2 (stderr) đi vào
+        # log máy chủ Jupyter và người dùng không thấy. Thiếu stderr=STDOUT thì mọi
+        # traceback biến mất, chỉ còn "Mã thoát: 1" — đúng cái bẫy đã sập ngày 30/09.
+        # Bỏ dòng comment: chính comment giải thích cũng nhắc lại chuỗi này.
+        ma_nguon_tam = "\n".join(
+            d for d in ("\n".join("".join(c["source"]) for c in nb["cells"]
+                                  if c["cell_type"] == "code")).splitlines()
+            if not d.lstrip().startswith("#"))
+        so_lan = ma_nguon_tam.count("stderr=subprocess.STDOUT")
+        kiem(so_lan == 2,
+             f"ca HAI o chay deu truyen stderr=subprocess.STDOUT (thuc te {so_lan})")
 
         # Bỏ các dòng gọi git: `--oneline` là cờ của git chứ không phải của audit.py
         ma_nguon = "\n".join("".join(c["source"]) for c in nb["cells"]
