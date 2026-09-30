@@ -313,6 +313,16 @@ def xu_ly_mot_anh(zf, ten_anh, ten_mask, classes, water_value,
 # Vẽ ảnh minh hoạ
 # ===========================================================================
 
+def ten_split(ten_anh):
+    """Tên split của một ảnh, suy từ đường dẫn: `.../<split>/<thư_mục_ảnh>/<tên>.jpg`.
+
+    Lấy thư mục CHA của thư mục chứa ảnh (tức `parts[-3]`), không lấy tên thư mục
+    chứa ảnh — tên đó là `train-org-img` chứ không phải `train`.
+    """
+    cha = PurePosixPath(ten_anh).parent
+    return cha.parent.name or cha.name or "?"
+
+
 def ten_file_overlay(ten_trong_zip):
     """Đổi đường dẫn trong zip thành tên file phẳng, GIỮ LẠI tên split.
 
@@ -387,6 +397,7 @@ def tong_hop(ds_ban_ghi, classes, decisions, preprocess):
     nuoc_tong = defaultdict(int)      # chỉ tính trên các ảnh có kiểm tra nước
     nuoc_cham = defaultdict(int)
     dem_gia_tri = Counter()
+    dem_gia_tri_split = defaultdict(Counter)   # split -> giá trị mask -> số pixel
     so_anh_co_lop = Counter()
     kich_thuoc_goc = Counter()
     so_anh_tong = 0
@@ -396,8 +407,13 @@ def tong_hop(ds_ban_ghi, classes, decisions, preprocess):
             continue
         so_anh_tong += 1
         kich_thuoc_goc[tuple(r["kich_thuoc_goc"])] += 1
+        # Đếm pixel theo TỪNG SPLIT, không chỉ tổng. Nếu một lớp vắng mặt thì câu hỏi
+        # đầu tiên luôn là "vắng ở mọi split hay chỉ một split" — trả lời được ngay
+        # trong báo cáo thì đỡ phải chạy lại 2343 ảnh chỉ để hỏi một câu.
+        split = ten_split(r["anh"])
         for g, c in r["dem_gia_tri"].items():
             dem_gia_tri[int(g)] += c
+            dem_gia_tri_split[split][int(g)] += c
 
         for ten_lop, lop in r["lop"].items():
             boxes = lop["boxes"]
@@ -415,6 +431,8 @@ def tong_hop(ds_ban_ghi, classes, decisions, preprocess):
         "so_anh_tong": so_anh_tong,
         "kich_thuoc_goc": {f"{h}x{w}": n for (h, w), n in kich_thuoc_goc.most_common()},
         "dem_gia_tri_mask": dict(sorted(dem_gia_tri.items())),
+        "dem_gia_tri_theo_split": {s: dict(sorted(c.items()))
+                                   for s, c in sorted(dem_gia_tri_split.items())},
         "so_anh_co_lop": dict(so_anh_co_lop),
         "kiem_tra_nuoc": {
             t: {"tong_component": nuoc_tong[t],
@@ -554,6 +572,26 @@ def ghi_bao_cao(kq, duong_dan):
     tong_px = sum(kq["dem_gia_tri_mask"].values()) or 1
     for g, c in kq["dem_gia_tri_mask"].items():
         d.append(f"| {g} | {c:,} | {c / tong_px:.4%} |")
+
+    # Bảng theo split: trả lời ngay "lớp vắng ở MỌI split hay chỉ một split". Chỉ in
+    # khi có từ hai split trở lên — một split thì bảng này lặp lại y hệt bảng trên.
+    theo_split = kq.get("dem_gia_tri_theo_split") or {}
+    if len(theo_split) > 1:
+        # Cột xếp theo thứ tự quen thuộc train/val/test, không xếp alphabet (alphabet
+        # cho ra test/train/val — đọc ngược, dễ nhầm cột).
+        quen_thuoc = ["train", "val", "test"]
+        ds_split = ([s for s in quen_thuoc if s in theo_split]
+                    + sorted(s for s in theo_split if s not in quen_thuoc))
+        d += ["", "## Số pixel mỗi giá trị mask theo split\n",
+              "Tỉ lệ tính riêng trong từng split (ba split lệch số ảnh nên phải chuẩn "
+              "hoá mới so được với nhau). Ô `0.0000%` nghĩa là **split đó không có "
+              "pixel nào của lớp này**.\n",
+              "| Giá trị | " + " | ".join(ds_split) + " |",
+              "|---" * (len(ds_split) + 1) + "|"]
+        for g in kq["dem_gia_tri_mask"]:
+            o = [f"{theo_split[s].get(g, 0) / (sum(theo_split[s].values()) or 1):.4%}"
+                 for s in ds_split]
+            d.append(f"| {g} | " + " | ".join(o) + " |")
 
     d += ["", "## Thống kê theo lớp\n",
           "Cột **p5 đã lọc** là con số dùng để quyết định tiling: đã bỏ các đốm nhỏ "

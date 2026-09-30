@@ -339,6 +339,29 @@ def main():
         kiem("min_area đề xuất: 64" in bao_cao,
              "min_area de xuat = min_side^2 = 8^2 = 64")
 
+        # Bảng theo split: khi một lớp vắng mặt thì câu hỏi đầu tiên luôn là "vắng ở
+        # mọi split hay chỉ một split". Trả lời sẵn trong báo cáo để khỏi phải chạy
+        # lại toàn bộ dữ liệu chỉ để hỏi một câu.
+        kiem("## Số pixel mỗi giá trị mask theo split" in bao_cao,
+             "bao cao co bang so pixel theo tung split")
+        kiem("| Giá trị | train | val | test |" in bao_cao,
+             "cot xep theo thu tu train/val/test, khong xep alphabet")
+        # Mẫu số phải là tổng số pixel CỦA TỪNG SPLIT, không phải tổng chung: train
+        # và test mỗi bên 2 ảnh, val chỉ 1 ảnh, nên cùng 400 pixel nước mà tỉ lệ của
+        # val phải gấp đôi. Dùng tổng chung thì ba ô sẽ bằng nhau và test này đỏ.
+        # Cắt lấy phần SAU tiêu đề: bảng tổng cũng có dòng "| 5 |" và nó đứng trước,
+        # tìm trong cả báo cáo thì vớ phải dòng của bảng tổng (3 cột, có dấu phẩy).
+        phan_split = bao_cao.split("## Số pixel mỗi giá trị mask theo split")[-1]
+        dong_nuoc = next((d for d in phan_split.splitlines() if d.startswith("| 5 |")), None)
+        kiem(dong_nuoc is not None, "bang theo split co dong cua gia tri 5 (nuoc)")
+        if dong_nuoc:
+            ty = [float(x.strip().rstrip("%")) for x in dong_nuoc.split("|")[2:5]]
+            kiem(ty[0] == ty[2] > 0,
+                 f"nuoc: train ({ty[0]}%) = test ({ty[2]}%) — hai split cung so anh")
+            kiem(abs(ty[1] - 2 * ty[0]) < 0.001,
+                 f"nuoc: val ({ty[1]}%) = 2x train ({ty[0]}%) — val chi co 1 anh, "
+                 f"mau so chia theo tung split chu khong dung tong chung")
+
         print("\n=== 6. Anh overlay duoc tao, KHONG bi ghi de ===")
         thu_muc_overlay = Path(output_dir, "overlay")
         ds_jpg = sorted(p.name for p in thu_muc_overlay.glob("*.jpg")) \
@@ -492,6 +515,8 @@ def main():
              "canh bao nam TRUOC bang so lieu, khong phai doc luot qua")
         kiem("| non_flooded_building | 2 | 0 |" in bao_cao_sach,
              "lop vang mat van co dong rieng trong bang, ghi ro 0 box")
+        kiem("Số pixel mỗi giá trị mask theo split" not in bao_cao_sach,
+             "chi mot split thi KHONG in bang theo split (lap lai bang tong)")
 
         print("\n=== 13. configs/data.yaml THAT phai co du moi khoa audit.py doc ===")
         # File config thật chỉ được chạy trên Colab, mà vòng sửa-lỗi ở đó rất đắt

@@ -447,6 +447,11 @@ Phân biệt được bằng cách chạy **đầy đủ** rồi đọc lại đ
 mà `1` vẫn không có pixel nào thì gần như chắc chắn là khả năng 2, phải dừng lại tra bảng
 lớp trước khi sang Phase 2.
 
+Báo cáo có thêm **bảng số pixel theo từng split** (train/val/test) vì câu hỏi tiếp theo
+luôn là "vắng ở mọi split hay chỉ một split" — trả lời sẵn trong báo cáo thì không phải
+chạy lại 2343 ảnh chỉ để hỏi một câu. Tỉ lệ tính riêng trong từng split: ba split lệch
+số ảnh (1445/450/448) nên lấy tổng chung làm mẫu số thì so với nhau là sai.
+
 Trạng thái đường ống: đã đóng gói lại thành `min_side_px` trong config, cảnh báo lớp vắng
 mặt, và **8 assertion mới** khoá hai hành vi này lại (`tests/test_audit.py` mục 12) —
 trong đó có ca "nhà to lẫn một đốm nhiễu": lấy nhầm cột thì kết luận đảo ngược từ KHÔNG
@@ -464,7 +469,7 @@ thành CÓ.
    - `configs/data.yaml` — toàn bộ tham số (đường dẫn, ngưỡng quyết định, tham số EDA)
    - `src/floodcount/data/audit.py` — khảo sát mask thật, trả lời checklist §2.2
    - `scripts/audit.py` — CLI mỏng bọc quanh module trên
-   - `tests/test_audit.py` — 85 assertion trên zip giả có cả bẫy ColorMasks
+   - `tests/test_audit.py` — 91 assertion trên zip giả có cả bẫy ColorMasks
    - `notebooks/01_data_prep.ipynb` — notebook chạy trên Colab (không cần GPU)
 
    **Việc của người dùng:** mở `notebooks/01_data_prep.ipynb` trên Colab, chạy ô
