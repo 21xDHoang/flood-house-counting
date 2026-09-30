@@ -323,7 +323,11 @@ tự kiểm và báo rõ phải chạy ô `[1.1]` trước.
   `ColorMasks-FloodNetv1.0/` (ảnh màu **chỉ để xem**, không dùng để train).
   ⚠️ Nếu trỏ nhầm vào thư mục gốc, công cụ dò theo tên sẽ tưởng `ColorMasks` là
   mask (vì tên có chữ "mask") → **train trên dữ liệu sai mà không báo lỗi**.
-- Mask là ảnh xám `mode=L`, kích thước **4000×3000** (khác `ColorMasks` 1024×1024).
+- Mask là ảnh xám `mode=L` (khác `ColorMasks` 1024×1024). Kích thước **KHÔNG đồng
+  nhất**: lần chạy đầy đủ 30/09/2026 đếm được **1991 ảnh 4000×3000** và **352 ảnh
+  4592×3072** (xem §2.4) — không phải "tất cả 4000×3000" như ghi nhận ban đầu. Bảng
+  phân loại thư mục ở dưới chỉ giải mã **một** file mỗi thư mục, nên nó in ra một cỡ
+  duy nhất cho cả thư mục; đó là kết luận quá rộng so với phép đo.
 
 **Cấu trúc chính xác bên trong zip — đo lại ngày 30/09/2026 bằng `audit.py`:**
 
@@ -341,8 +345,13 @@ Hai kết luận quan trọng rút ra từ bảng này:
 
 1. **Tập test CÓ nhãn** (448 mask) — không phải tự chia lại val thành val/test. Giữ
    nguyên split gốc của FloodNet, đúng tinh thần "test chỉ chạy một lần" ở Phase 5.
-2. **Ảnh và mask cùng kích thước** 4000×3000 — không phải resize mask trước khi lấy
-   box. (Vẫn phải resize vì lý do khác: đưa về `target_long_side` cho vừa VRAM.)
+2. **Ảnh và mask cùng kích thước** — nên không phải resize mask cho khớp ảnh trước khi
+   lấy box. (Vẫn phải resize vì lý do khác: đưa về `target_long_side` cho vừa VRAM.)
+   ⚠️ Mức độ tin cậy của kết luận này **thấp hơn hai kết luận trên**: bảng phân loại
+   chỉ giải mã 1 file mỗi thư mục, còn `audit.py` chỉ đọc **mask** của cả 2343 cặp.
+   Đối chiếu được trên 30 ảnh overlay (không ảnh nào báo lệch) và trên §2.4 (352 ảnh
+   cỡ khác). **Phase 2 phải khẳng định lại bằng một dòng assert cho TỪNG cặp** — nếu
+   15% dữ liệu lệch cỡ thì box lệch chỗ và hỏng cả tập train mà không ai báo.
 
 **Quy ước đặt tên — chỗ đã làm hỏng lần chạy thật đầu tiên:**
 
@@ -364,9 +373,15 @@ thật, không chỉ cấu trúc thư mục.
   |---|---|---|---|---|---|---|---|---|---|---|
   | Lớp | Background | Building-Flooded | Building-Non-Flooded | Road-Flooded | Road-Non-Flooded | Water | Tree | Vehicle | Pool | Grass |
 
-- Phát hiện quan trọng cho báo cáo: chỉ **~22%** số nhà gán nhãn "ngập" thực sự
-  chạm vùng nước; nhãn `Building-Flooded` của FloodNet rộng hơn định nghĩa
-  thường hiểu. Hệ quả: **đừng kỳ vọng mAP@50 > 0,9**; khoảng hợp lý là 0,4–0,7.
+- ~~Phát hiện quan trọng cho báo cáo: chỉ **~22%** số nhà gán nhãn "ngập" thực sự chạm
+  vùng nước~~ → **con số 22% KHÔNG tái lập được** (đo lại 30/09/2026, xem §2.4): trên
+  mẫu 60 ảnh, tỉ lệ component chạm nước là 83,3% với `flooded_building` và 65,7% với
+  `non_flooded_building`. Hướng thì đúng (nhà ngập chạm nước nhiều hơn), nhưng mẫu nhỏ
+  và phép đo bị pha loãng bởi đốm nhiễu chưa lọc, nên **chưa đủ cơ sở để trích dẫn một
+  con số nào**. Mục "kiểm chứng lớp 1" phải đo lại tử tế trước khi đưa vào báo cáo.
+  Lập luận "nhãn `Building-Flooded` rộng hơn định nghĩa thường hiểu" thì **vẫn giữ**:
+  hai lớp chạm nước 83% và 66% là gần nhau, tức vùng nước không phải thứ phân biệt
+  chúng. Hệ quả vẫn là: **đừng kỳ vọng mAP@50 > 0,9**; khoảng hợp lý 0,4–0,7.
 
 ### 2.2 Phase 1 PHẢI xác nhận lại (chưa kiểm cho repo này)
 
@@ -381,9 +396,13 @@ Các số dưới đây chỉ là **kỳ vọng** để đối chiếu, chưa ph
       → **1445 train / 450 val / 448 test**, xem bảng ở §2.1. (đo 30/09/2026)
 - [x] Tập **test có nhãn hay không** → **CÓ**, 448 mask. Giữ nguyên split gốc. (đo 30/09/2026)
 - [x] Ảnh và mask có cùng kích thước không → **cùng 4000×3000**, không lệch. (đo 30/09/2026)
-- [ ] Số ảnh mỗi split, số pixel mỗi lớp, số ảnh có/không có nhà ngập
-- [ ] Phân bố diện tích nhà và **cạnh box nhỏ nhất sau khi resize** → quyết định
-      có cần cắt tile hay không (ngưỡng đã chốt trong plan: percentile 5 ≥ ~32px thì không cần)
+- [x] Số ảnh mỗi split, số pixel mỗi lớp, số ảnh có/không có nhà ngập
+      → **1445/450/448 cặp**; đủ **cả 10 giá trị mask**; xem bảng đầy đủ ở §2.4.
+      (đo 30/09/2026, chạy đầy đủ 2343 ảnh)
+- [x] Phân bố diện tích nhà và **cạnh box nhỏ nhất sau khi resize** → đã đo, xem §2.4.
+      Kết quả: p5 (đã lọc nhiễu) = **28.0px** < 32px → theo đúng quy tắc đã chốt trong
+      plan thì **CẦN cắt tile**. Đây là kết quả SÁT NGƯỠNG (28 so với 32) và toàn bộ
+      phần thiếu đến từ một lớp, nên phải bàn kỹ ở GATE 1 — xem lập luận ở §2.4.
 
 **Hai điểm lệch có chủ ý so với câu chữ của plan — để bảo vệ được:**
 
@@ -457,6 +476,90 @@ mặt, và **8 assertion mới** khoá hai hành vi này lại (`tests/test_audi
 trong đó có ca "nhà to lẫn một đốm nhiễu": lấy nhầm cột thì kết luận đảo ngược từ KHÔNG
 thành CÓ.
 
+### 2.4 Chạy ĐẦY ĐỦ 2343 ảnh — số liệu thật của Phase 1 (30/09/2026)
+
+Chạy `notebooks/01_data_prep.ipynb` ô [1.6] trên Colab, mã thoát 0. Đây là **nội dung
+GATE 1**.
+
+**Cấu trúc & ghép cặp — khớp hoàn toàn với §2.1:** 1445 + 450 + 448 = 2343 cặp, không
+thiếu file nào; bẫy `ColorMasks` bị chặn đúng (3 thư mục, 2343 file bị bỏ qua).
+
+**Hai cỡ ảnh, không phải một:**
+
+| Cỡ mask | Số ảnh | Tỉ lệ resize về cạnh dài 1536 |
+|---|---|---|
+| 4000×3000 | 1991 | 0,3840 |
+| 4592×3072 | 352 | 0,3345 |
+
+Hệ quả: độ phân giải thực trên mặt đất của 352 ảnh này **nhỏ hơn 13%** so với phần còn
+lại, tức cùng một căn nhà cho ra box nhỏ hơn 13%. Không sai, nhưng là lý do chính đáng
+để bật augmentation đổi tỉ lệ khi train (Phase 3).
+
+**Số pixel mỗi giá trị mask (toàn bộ 2343 ảnh):**
+
+| Giá trị | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Vai trò | nền | nhà ngập | nhà khô | đường ngập | đường khô | nước | cây | xe | bể bơi | cỏ |
+| Tỉ lệ | 1,92% | 1,84% | 3,18% | 2,97% | 5,59% | 11,11% | 17,77% | 0,18% | 0,20% | 55,24% |
+
+→ **Câu hỏi để mở ở §2.3 đã có lời giải: cả 10 giá trị đều có mặt.** Lớp 1
+(`flooded_building`) tồn tại thật (1,84% số pixel, 3534 box), nên bảng lớp ở §2.1
+**đúng**, và 9 ảnh mẫu trước đó chỉ là không đại diện. Không phải dừng lại tra bảng lớp.
+Tỉ lệ theo từng split cũng cân (lớp 1: 1,79% train / 1,99% val / 1,87% test).
+
+**Thống kê box (sau resize cạnh dài 1536, đã bỏ đốm nhiễu < 8px):**
+
+| Lớp | Số box | Bỏ do nhiễu | Box/ảnh TB | Max | p5 đã lọc | p50 đã lọc | p5 thô | DT p50 đã lọc | Box to bất thường |
+|---|---|---|---|---|---|---|---|---|---|
+| flooded_building | 3534 | 433 (10,9%) | 1,51 | 45 | 44,0 | 166,0 | 1,0 | 17.987 | 14 (0,5%) |
+| non_flooded_building | 3985 | 744 (15,7%) | 1,70 | 54 | **28,0** | 148,0 | 1,0 | 12.285 | 1096 (33,8%) |
+
+Đọc bảng này:
+
+- **1177 đốm nhiễu đã bị loại** (13,5% tổng số component). Không lọc thì cả hai lớp đều
+  có p5 = 1,0px và mọi kết luận đều do rác quyết định — đúng lỗi 1 ở §2.3.
+- Nhà thật **rất to so với ngưỡng**: p50 = 148–166px, gấp ~5 lần mốc 32px. Chỉ có đuôi
+  nhỏ nhất mới đáng lo.
+
+**Kết luận tự động của công cụ và đánh giá của tôi:**
+
+1. **Cắt tile: theo quy tắc đã chốt thì CÓ** — nhưng đây là kết quả **sát ngưỡng** và
+   cần bàn: p5 = 28,0px < 32px, mà **toàn bộ phần thiếu đến từ `non_flooded_building`**
+   (`flooded_building` một mình là 44,0px, vượt ngưỡng thoải mái). Nghĩa là quyết định
+   độ phân giải của cả đồ án đang do một lớp quyết định, và chỉ vì 28 < 32 đúng 4px.
+2. **Tách nhà dính: số liệu nói CÓ (17,5%) — nhưng TÔI CHO RẰNG CHỈ SỐ NÀY KHÔNG ĐO
+   CHUYỆN GỘP NHÀ.** Lý do: `flooded_building` chỉ 0,5% box bị gắn cờ còn
+   `non_flooded_building` tới 33,8% — chênh **67 lần**. Nếu là nhà dính nhau thật thì
+   hai lớp phải na ná nhau (nhà kề nhà thì kề như nhau, ngập hay không ngập không ảnh
+   hưởng). Chênh lệch cỡ đó nghĩa là chỉ số đang đo **phân bố kích thước nhà** (nhà ống
+   vs nhà xưởng), không đo chuyện gộp. Thêm nữa, bản đầu của công cụ lấy trung vị của
+   *tất cả* box làm mốc 3×, mà đốm nhiễu kéo trung vị xuống → mốc bị hạ → càng nhiều box
+   to bị gắn cờ (đã sửa, xem lỗi 3 bên dưới).
+3. **`min_area` = 64** (bằng `min_side_px²`) — giữ nguyên như config.
+
+**Lỗi thứ ba lộ ra ở lần chạy này — mốc "3× trung vị" tính sai.**
+
+Tử số đã lọc nhiễu (chỉ đem box to đi so) nhưng **mẫu số/mốc vẫn lấy trung vị của tất cả
+box**, kể cả 744 đốm của `non_flooded_building`. Đốm kéo trung vị xuống, hạ thấp mốc 3×,
+và mọi căn nhà to thật đều vượt mốc. Đây là lời giải thích trực tiếp cho con số 33,8%.
+Đã sửa: mốc tính trên trung vị **đã lọc**; có test riêng (`tests/test_audit.py` mục 14)
+dựng đúng ca "2 nhà to + 6 đốm" — lấy trung vị thô thì kết luận đảo ngược thành "CÓ".
+
+**Kiểm chứng "nhà ngập nằm cạnh nước" — yếu, chưa dùng được:**
+
+| Lớp | Tổng component | Chạm nước | Tỉ lệ |
+|---|---|---|---|
+| flooded_building | 18 | 15 | 83,3% |
+| non_flooded_building | 67 | 44 | 65,7% |
+
+Hướng đúng (nhà ngập chạm nước nhiều hơn) nhưng **mẫu quá nhỏ** (18 component!) và tỉ lệ
+bị pha loãng vì tính trên mọi component kể cả đốm nhiễu chưa lọc — đốm nhiễu hiếm khi
+chạm nước nên tỉ lệ thật phải cao hơn bảng này. Đây là lý do con số "~22%" ở §2.1 không
+tái lập được. Muốn trích dẫn thì phải đo lại trên mẫu lớn hơn và chỉ trên box đã lọc.
+
+**Còn thiếu để chốt GATE 1:** nhận xét **bằng mắt** 30 ảnh trong `runs/eda/overlay/` —
+cụ thể là các box viền TÍM, để phân biệt "một căn nhà to" với "nhiều căn bị gộp".
+
 ---
 
 ## 3. Việc tiếp theo
@@ -465,17 +568,18 @@ thành CÓ.
    **Xong 30/09/2026** — xem §1.5 và §1.6.
 2. Repo đã đẩy lên GitHub: **https://github.com/21xDHoang/flood-house-counting**
    (public, nhánh `main`). Colab clone repo này về `/content` ở đầu mỗi phiên.
-3. **Phase 1 — code xong, chờ chạy thật để chốt GATE 1.** Đã đẩy lên GitHub:
+3. **Phase 1 — đã chạy ĐẦY ĐỦ 2343 ảnh (30/09/2026), số liệu ở §2.4. Đang chờ xác
+   nhận GATE 1.** Đã đẩy lên GitHub:
    - `configs/data.yaml` — toàn bộ tham số (đường dẫn, ngưỡng quyết định, tham số EDA)
    - `src/floodcount/data/audit.py` — khảo sát mask thật, trả lời checklist §2.2
    - `scripts/audit.py` — CLI mỏng bọc quanh module trên
-   - `tests/test_audit.py` — 91 assertion trên zip giả có cả bẫy ColorMasks
+   - `tests/test_audit.py` — 99 assertion trên zip giả có cả bẫy ColorMasks
    - `notebooks/01_data_prep.ipynb` — notebook chạy trên Colab (không cần GPU)
 
-   **Việc của người dùng:** mở `notebooks/01_data_prep.ipynb` trên Colab, chạy ô
-   [1.5] (chạy thử 3 ảnh) trước, rồi ô [1.6] (chạy đầy đủ), rồi gửi lại phần
-   `CẤU TRÚC ZIP`, nội dung `EDA_REPORT.md`, và nhận xét bằng mắt về ảnh overlay.
+   **Việc của người dùng để chốt GATE 1:** mở `runs/eda/overlay/` (30 ảnh) xem bằng
+   mắt, mô tả các box viền TÍM — đó là dữ liệu duy nhất phân biệt được "một căn nhà
+   to" với "nhiều căn bị gộp", và là cơ sở để quyết định có làm watershed hay không.
 
-   Ô [1.5] **đã chạy xong ngày 30/09/2026** và đã soi ra hai lỗi phương pháp (§2.3).
-   Còn lại ô [1.6] — chạy đầy đủ 2343 ảnh, khoảng 15–30 phút — mới đủ số liệu chốt
-   GATE 1 và trả lời câu hỏi còn để mở ở §2.3 (lớp 1 có thật sự vắng mặt không).
+   Ô [1.5] chạy thử và ô [1.6] chạy đầy đủ **đều đã xong**. Chạy lại [1.6] bây giờ rất
+   nhanh (~2 phút) vì nó đọc lại `audit.jsonl` cũ thay vì xử lý lại 2343 ảnh — dùng
+   mỗi khi chỉ cần đổi phần báo cáo.

@@ -133,6 +133,39 @@ def tao_zip_sach(duong_dan_zip):
     return duong_dan_zip
 
 
+def tao_zip_median(duong_dan_zip):
+    """Zip giả: nhà TO lẫn NHIỀU đốm nhiễu — khoá mốc "3x trung vị".
+
+    Lần chạy đầy đủ 30/09/2026 cho ra non_flooded_building bị gắn cờ "to bất
+    thường" 1096/3985 box còn flooded_building chỉ 14 — chênh 78 lần. Nếu là nhà
+    bị gộp thật thì hai lớp phải na ná nhau, nên con số lệch như vậy nghĩa là cái
+    MỐC so sánh hỏng: trung vị tính trên tất cả box (kể cả đốm vài pixel), mà đốm
+    kéo trung vị xuống, hạ thấp mốc 3x, và mọi căn nhà to thật đều vượt mốc.
+
+    Dựng đúng tình huống đó: lớp 1 có 2 nhà to + 6 đốm, lớp 2 có 1 nhà to.
+      - Trung vị THÔ = 1px (sáu giá trị nhỏ nhất đều là đốm) -> mốc 3px -> cả 3
+        nhà to bị gắn cờ -> "Tách nhà dính: CÓ".
+      - Trung vị ĐÃ LỌC = 1600px -> mốc 4800 -> không nhà nào bị gắn cờ -> "KHÔNG".
+    """
+
+    def tao_mask_median():
+        mask = np.zeros((H, W), np.uint8)
+        mask[10:90, 10:90] = 1          # nhà to 1 -> 40x40 sau resize, diện tích 1600
+        mask[10:90, 200:280] = 1        # nhà to 2
+        for i in range(6):              # 6 đốm 2x2 -> 1x1 sau resize, cách nhau 10px
+            mask[200:202, 10 + i * 20:12 + i * 20] = 1
+        mask[120:200, 300:380] = 2      # lớp 2: một nhà to, để không có lớp vắng mặt
+        return mask
+
+    anh_mau = np.full((H, W, 3), 180, np.uint8)
+    with zipfile.ZipFile(duong_dan_zip, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("FloodNet-Supervised_v1.0/train/train-org-img/1.jpg",
+                   ma_hoa_jpg(anh_mau))
+        z.writestr("FloodNet-Supervised_v1.0/train/train-label-img/1_lab.png",
+                   ma_hoa_png(tao_mask_median()))
+    return duong_dan_zip
+
+
 def tao_config_gia(duong_dan_yaml, zip_path, output_dir, work_dir):
     """Config tối thiểu, trỏ vào dữ liệu giả. Dùng y hệt khoá của configs/data.yaml."""
     noi_dung = f"""
@@ -197,12 +230,16 @@ def doc_dong_lop(bao_cao, ten_lop):
 
     Trả về None nếu không có dòng nào. Thứ tự ô theo đúng header của bảng:
       1=tên lớp, 2=giá trị mask, 3=số box, 4=bỏ do nhiễu, 5=box/ảnh TB,
-      6=box/ảnh max, 7=p5 đã lọc, 8=p50 đã lọc, 9=p5 thô, 10=diện tích p50,
-      11=box to bất thường.
+      6=box/ảnh max, 7=p5 đã lọc, 8=p50 đã lọc, 9=p5 thô, 10=DT p50 thô,
+      11=DT p50 đã lọc, 12=box to bất thường.
     Kiểm bằng ô số chứ không so cả dòng: so cả dòng thì mỗi lần đổi định dạng
     hiển thị là test đỏ, mà định dạng hiển thị không phải thứ cần bảo vệ.
     """
-    for d in bao_cao.splitlines():
+    # Cắt lấy phần SAU tiêu đề bảng. Bảng "Số ảnh có / không có từng lớp" cũng có
+    # dòng bắt đầu bằng "| flooded_building |" và đứng TRƯỚC bảng này, nên tìm
+    # trong cả báo cáo sẽ vớ phải dòng 4 ô của bảng đó.
+    phan = bao_cao.split("## Thống kê theo lớp")[-1]
+    for d in phan.splitlines():
         if d.startswith(f"| {ten_lop} |"):
             return [o.strip() for o in d.split("|")]
     return None
@@ -317,6 +354,11 @@ def main():
              "lop 1: 3/3 component cham nuoc (100%)")
         kiem("| non_flooded_building | 3 | 0 | 0.0% |" in bao_cao,
              "lop 2: 0/3 component cham nuoc (0%)")
+        # Phép kiểm nước chỉ chạy trên ảnh có nước (3/5 ảnh ở đây) — mẫu nhỏ thì
+        # tỉ lệ chỉ nói lên HƯỚNG, nên báo cáo phải nói rõ mẫu gồm mấy ảnh. Bản
+        # đầu không in con số này, đọc bảng xong tưởng 3 component là toàn bộ dữ liệu.
+        kiem("Chỉ chạy trên **3 ảnh** có vùng nước" in bao_cao,
+             "bao cao ghi ro phep kiem nuoc chi chay tren 3 anh co nuoc")
 
         print("\n=== 5. Ket luan tiling dua tren so lieu DA LOC NHIEU ===")
         # Ảnh 2 có một đốm nhiễu 2x2 ở lớp 1. Không lọc thì percentile 5 thô của
@@ -338,6 +380,17 @@ def main():
              "canh p5 DA LOC nho nhat = 10px < 32px -> ket luan PHAI cat tile")
         kiem("min_area đề xuất: 64" in bao_cao,
              "min_area de xuat = min_side^2 = 8^2 = 64")
+
+        # Bảng "ảnh có / không có lớp": lớp 1 chỉ có box HỢP LỆ ở 3 ảnh loại 1
+        # (train/1, val/1, test/1); hai ảnh loại 2 chỉ có một đốm 2x2 nên KHÔNG
+        # tính là "ảnh có nhà ngập". Đếm theo box thô thì ra 5/5 và bảng này thôi
+        # nói lên điều gì — mà đây đúng là con số dùng để chia train/val.
+        kiem("## Số ảnh có / không có từng lớp" in bao_cao,
+             "bao cao co bang so anh co/khong co tung lop")
+        kiem("| flooded_building | 3 (60.0%) | 2 (40.0%) |" in bao_cao,
+             "lop 1: 3/5 anh co nha that, 2 anh chi co dom nhieu")
+        kiem("| non_flooded_building | 5 (100.0%) | 0 (0.0%) |" in bao_cao,
+             "lop 2: ca 5 anh deu co nha that")
 
         # Bảng theo split: khi một lớp vắng mặt thì câu hỏi đầu tiên luôn là "vắng ở
         # mọi split hay chỉ một split". Trả lời sẵn trong báo cáo để khỏi phải chạy
@@ -537,6 +590,37 @@ def main():
         # khác nhau trong cùng một pipeline: Phase 1 lọc một kiểu, Phase 2 lọc kiểu khác.
         kiem(cfg_that["preprocess"]["min_area"] == cfg_that["decisions"]["min_side_px"] ** 2,
              "min_area == min_side_px^2 (hai nguong khong mau thuan)")
+
+        print("\n=== 14. Moc '3x trung vi' phai tinh tren trung vi DA LOC ===")
+        # Bẫy thứ ba của lần chạy đầy đủ 30/09/2026. Bản đầu đã lọc nhiễu cho tử số
+        # (box đem đi so) nhưng vẫn lấy trung vị của TẤT CẢ box làm mốc, nên đốm vài
+        # pixel kéo mốc xuống và nhà to thật bị gắn cờ "nghi bị gộp" — đúng thứ làm
+        # cho non_flooded_building có 1096 box bị gắn cờ so với 14 của lớp kia.
+        zip_med = tao_zip_median(os.path.join(tmp, "median.zip"))
+        work_med = os.path.join(tmp, "work_median")
+        output_med = os.path.join(tmp, "eda_median")
+        config_med = tao_config_gia(os.path.join(tmp, "median.yaml"), zip_med,
+                                    output_med, work_med)
+        ma_med, stdout_med, stderr_med = chay_audit(config_med, work_med)
+        if ma_med != 0:
+            print(stdout_med[-3000:])
+            print(stderr_med[-3000:])
+            raise SystemExit(f"*** audit.py tren zip 'median' thoat voi ma {ma_med} ***")
+
+        bao_cao_med = Path(output_med, "EDA_REPORT.md").read_text(encoding="utf-8")
+        dong_med = doc_dong_lop(bao_cao_med, "flooded_building")
+        kiem(dong_med is not None and dong_med[3] == "8" and dong_med[4] == "6",
+             f"lop 1: 8 box, dung 6 dom nhieu bi loc, "
+             f"thuc te {dong_med[3:5] if dong_med else None}")
+        # Đây mới là điều đáng test: lấy trung vị thô thì cả 2 nhà to của lớp 1 bị
+        # gắn cờ, kết luận đảo thành "CÓ" (2+1 box bị cờ trên 3 box = 100% > 5%).
+        kiem(dong_med is not None and dong_med[12] == "0",
+             f"moc 3x tinh tren trung vi DA LOC -> khong nha to nao bi gan co, "
+             f"thuc te {dong_med[12] if dong_med else '?'} box bi gan co")
+        kiem("Tách nhà dính: KHÔNG" in bao_cao_med,
+             "lay trung vi tho thi ket luan dao nguoc thanh CO")
+        kiem("Cắt tile: KHÔNG" in bao_cao_med,
+             "nha 40px sau resize >= 32px -> KHONG can cat tile")
 
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

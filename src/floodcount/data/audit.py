@@ -335,11 +335,17 @@ def ten_file_overlay(ten_trong_zip):
     return "_".join(phan[-3:]).rsplit(".", 1)[0] + ".jpg"
 
 
-def ve_overlay(zf, ten_anh, ban_ghi, thu_muc_ra, nguong_to_bat_thuong):
+def ve_overlay(zf, ten_anh, ban_ghi, thu_muc_ra, nguong_to_bat_thuong,
+               trung_vi_dien_tich, min_side_px):
     """Vẽ box lên ảnh rồi lưu JPEG.
 
     Box có diện tích > nguong_to_bat_thuong x trung vị được vẽ MÀU KHÁC để người
     dùng nhìn bằng mắt xem có phải nhiều nhà bị gộp làm một không.
+
+    `trung_vi_dien_tich` là trung vị của TOÀN BỘ dữ liệu (đã lọc nhiễu), truyền từ
+    tong_hop() vào — KHÔNG lấy trung vị riêng của ảnh đang vẽ. Lấy trung vị riêng
+    thì một ảnh chỉ có 2 căn nhà sẽ tô tím căn to hơn, dù nó chẳng to gì so với
+    đồ án, và màu tím mất hết ý nghĩa.
 
     Trả về (thành_công, cảnh_báo).
     """
@@ -359,21 +365,28 @@ def ve_overlay(zf, ten_anh, ban_ghi, thu_muc_ra, nguong_to_bat_thuong):
     h2, w2 = ban_ghi["kich_thuoc_resize"]
     anh = cv2.resize(anh, (w2, h2), interpolation=cv2.INTER_AREA)
 
-    # Trung vị diện tích của TẤT CẢ box hai lớp, để so cho cùng một mốc
-    tat_ca_dt = [b[4] for lop in ban_ghi["lop"].values() for b in lop["boxes"]]
-    trung_vi = float(np.median(tat_ca_dt)) if tat_ca_dt else 0.0
+    trung_vi = trung_vi_dien_tich or 0.0
 
     mau = {"flooded_building": (0, 0, 255),        # đỏ = nhà ngập
            "non_flooded_building": (0, 200, 0)}    # xanh lá = nhà không ngập
 
     for ten_lop, lop in ban_ghi["lop"].items():
+        # Không vẽ đốm nhiễu: box 2px chỉ làm rối mắt, mà mắt người dùng đang cần
+        # soi chuyện "nhiều nhà bị gộp" chứ không phải soi rác gán nhãn — rác đã
+        # có cột "Bỏ do nhiễu" trong báo cáo lo.
         for x, y, bw, bh, area in lop["boxes"]:
+            if min(bw, bh) < min_side_px:
+                continue
             to_bat_thuong = trung_vi > 0 and area > nguong_to_bat_thuong * trung_vi
             mau_vien = (255, 0, 255) if to_bat_thuong else mau.get(ten_lop, (255, 255, 255))
             cv2.rectangle(anh, (x, y), (x + bw, y + bh), mau_vien,
                           3 if to_bat_thuong else 2)
 
-    dong = [f"{t}: {l['so_component']}" for t, l in ban_ghi["lop"].items()]
+    dong = []
+    for t, l in ban_ghi["lop"].items():
+        ve = sum(1 for b in l["boxes"] if min(b[2], b[3]) >= min_side_px)
+        bo = len(l["boxes"]) - ve
+        dong.append(f"{t}: {ve} box" + (f" (bỏ {bo} đốm < {min_side_px}px)" if bo else ""))
     for i, d in enumerate(dong):
         vi_tri = (10, 30 + i * 28)
         cv2.putText(anh, d, vi_tri, cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 0), 5, cv2.LINE_AA)
@@ -398,9 +411,12 @@ def tong_hop(ds_ban_ghi, classes, decisions, preprocess):
     nuoc_cham = defaultdict(int)
     dem_gia_tri = Counter()
     dem_gia_tri_split = defaultdict(Counter)   # split -> giá trị mask -> số pixel
-    so_anh_co_lop = Counter()
+    so_anh_co_lop = Counter()         # ảnh có ít nhất 1 component (kể cả đốm nhiễu)
+    so_anh_co_box_loc = Counter()     # ảnh có ít nhất 1 box ĐÃ LỌC NHIỄU
     kich_thuoc_goc = Counter()
     so_anh_tong = 0
+    so_anh_kiem_tra_nuoc = 0          # số ảnh thực sự chạy phép kiểm chứng nước
+    min_side_px = decisions["min_side_px"]
 
     for r in ds_ban_ghi:
         if "loi" in r:
@@ -415,6 +431,9 @@ def tong_hop(ds_ban_ghi, classes, decisions, preprocess):
             dem_gia_tri[int(g)] += c
             dem_gia_tri_split[split][int(g)] += c
 
+        if any("so_component_cham_nuoc" in lop for lop in r["lop"].values()):
+            so_anh_kiem_tra_nuoc += 1
+
         for ten_lop, lop in r["lop"].items():
             boxes = lop["boxes"]
             box_moi_anh[ten_lop].append(len(boxes))
@@ -423,17 +442,24 @@ def tong_hop(ds_ban_ghi, classes, decisions, preprocess):
             for x, y, bw, bh, area in boxes:
                 canh[ten_lop].append(min(bw, bh))
                 dien_tich[ten_lop].append(area)
+            # Đếm theo box ĐÃ LỌC: một ảnh chỉ có đúng một đốm 2px không phải là
+            # "ảnh có nhà ngập", mà đó mới là câu người đọc bảng này muốn hỏi.
+            if any(min(b[2], b[3]) >= min_side_px for b in boxes):
+                so_anh_co_box_loc[ten_lop] += 1
             if "so_component_cham_nuoc" in lop:
                 nuoc_tong[ten_lop] += len(boxes)
                 nuoc_cham[ten_lop] += lop["so_component_cham_nuoc"]
 
     ket_qua = {
         "so_anh_tong": so_anh_tong,
+        "target_long_side": preprocess["target_long_side"],
         "kich_thuoc_goc": {f"{h}x{w}": n for (h, w), n in kich_thuoc_goc.most_common()},
         "dem_gia_tri_mask": dict(sorted(dem_gia_tri.items())),
         "dem_gia_tri_theo_split": {s: dict(sorted(c.items()))
                                    for s, c in sorted(dem_gia_tri_split.items())},
         "so_anh_co_lop": dict(so_anh_co_lop),
+        "so_anh_co_box_loc": dict(so_anh_co_box_loc),
+        "so_anh_kiem_tra_nuoc": so_anh_kiem_tra_nuoc,
         "kiem_tra_nuoc": {
             t: {"tong_component": nuoc_tong[t],
                 "cham_nuoc": nuoc_cham[t],
@@ -442,14 +468,13 @@ def tong_hop(ds_ban_ghi, classes, decisions, preprocess):
         "lop": {},
     }
 
+    dt_loc_tat_ca = []                # gom lại để tính mốc "to bất thường" cho overlay
     for gia_tri_lop, ten_lop in classes.items():
         c = np.array(canh[ten_lop]) if canh[ten_lop] else np.array([])
         dt = np.array(dien_tich[ten_lop]) if dien_tich[ten_lop] else np.array([])
         if len(c) == 0:
             ket_qua["lop"][ten_lop] = {"gia_tri_mask": gia_tri_lop, "so_box": 0}
             continue
-
-        trung_vi_dt = float(np.median(dt))
 
         # --- Lọc nhiễu trước khi kết luận về tile ---
         # Mask FloodNet có vô số đốm vài pixel (lỗi gán nhãn). Nếu để lẫn, percentile
@@ -459,8 +484,19 @@ def tong_hop(ds_ban_ghi, classes, decisions, preprocess):
         #
         # Lọc theo CẠNH nhỏ nhất chứ không theo diện tích: một mảng 1x500 pixel có
         # diện tích lớn hơn ngưỡng nhưng vẫn là vệt rác, không phải nhà.
-        loc = c >= decisions["min_side_px"]
+        loc = c >= min_side_px
         c_loc, dt_loc = c[loc], dt[loc]
+        if len(dt_loc):
+            dt_loc_tat_ca.append(dt_loc)
+
+        # Mốc "to bất thường" (3x trung vị) cũng phải tính trên tập ĐÃ LỌC. Tính
+        # trên tập thô thì hàng trăm đốm vài pixel kéo trung vị xuống, hạ thấp mốc,
+        # và nhà to thật bị gắn cờ "nghi bị gộp". Đã xảy ra thật ở lần chạy đầy đủ
+        # 30/09/2026: non_flooded_building bị gắn cờ 1096/3985 box (27.5%) còn
+        # flooded_building chỉ 14 box — nếu là gộp nhà thật thì hai lớp phải na ná
+        # nhau, chênh 78 lần nghĩa là cái mốc đang đo phân bố kích thước, không đo
+        # chuyện gộp nhà.
+        trung_vi_dt_loc = float(np.median(dt_loc)) if len(dt_loc) else None
 
         ket_qua["lop"][ten_lop] = {
             "gia_tri_mask": gia_tri_lop,
@@ -478,11 +514,17 @@ def tong_hop(ds_ban_ghi, classes, decisions, preprocess):
             "canh_nho_nhat_p50_loc": float(np.percentile(c_loc, 50)) if len(c_loc) else None,
             "dien_tich_p1": float(np.percentile(dt, 1)),
             "dien_tich_p5": float(np.percentile(dt, 5)),
-            "dien_tich_p50": trung_vi_dt,
+            "dien_tich_p50": float(np.median(dt)),          # thô, để đối chiếu
+            "dien_tich_p50_loc": trung_vi_dt_loc,           # mốc dùng ra quyết định
             "dien_tich_p95": float(np.percentile(dt, 95)),
-            "so_box_to_bat_thuong": int((dt_loc > decisions["area_outlier_ratio"] * trung_vi_dt).sum())
-            if len(dt_loc) else 0,
+            "so_box_to_bat_thuong": int(
+                (dt_loc > decisions["area_outlier_ratio"] * trung_vi_dt_loc).sum())
+            if trung_vi_dt_loc else 0,
         }
+
+    # Một mốc duy nhất cho cả hai lớp, để ảnh overlay không tuỳ tiện theo ảnh.
+    ket_qua["trung_vi_dien_tich_loc"] = (
+        float(np.median(np.concatenate(dt_loc_tat_ca))) if dt_loc_tat_ca else None)
 
     ket_qua["ket_luan"] = ket_luan(ket_qua, decisions, preprocess)
     return ket_qua
@@ -530,7 +572,15 @@ def ket_luan(kq, decisions, preprocess):
     # Nói rõ "đã lọc" trong câu kết luận: mẫu số ở đây nhỏ hơn cột "Số box" trong
     # bảng, người đọc đối chiếu hai chỗ mà không thấy giải thích sẽ tưởng script sai.
     kl["ly_do_tach"] = (f"{tong_to}/{tong_box} box đã lọc nhiễu ({ty_le_to:.1%}) có "
-                        f"diện tích > {decisions['area_outlier_ratio']}x trung vị")
+                        f"diện tích > {decisions['area_outlier_ratio']}x trung vị "
+                        f"diện tích đã lọc")
+    # Con số này KHÔNG chứng minh có nhà bị gộp — nó chỉ nói "có nhiều box to gấp 3
+    # lần trung vị". Phân bố diện tích nhà vốn dĩ rất rộng (nhà ống vs nhà xưởng),
+    # nên phải nhìn ảnh overlay mới phân biệt được "một căn nhà to" với "hai căn bị
+    # dính". Ghi thẳng vào kết luận để người đọc không tự suy diễn quá mức.
+    kl["ly_do_tach_can_kiem_bang_mat"] = (
+        "chỉ số này đo phân bố kích thước nhà, KHÔNG tự chứng minh có gộp nhà; "
+        "phải xem box viền TÍM trong overlay/ mới kết luận được")
 
     # --- 3. min_area gợi ý ---
     # Đây là LỰA CHỌN THIẾT KẾ, không phải số đo: một nhà nhỏ hơn min_side x min_side
@@ -565,7 +615,12 @@ def ghi_bao_cao(kq, duong_dan):
 
     d += ["## Kích thước ảnh gốc\n"]
     for k, n in kq["kich_thuoc_goc"].items():
-        d.append(f"- `{k}`: {n} ảnh")
+        # Kèm luôn tỉ lệ resize: hai cỡ ảnh trong cùng một dataset nghĩa là hai tỉ lệ
+        # khác nhau, tức độ phân giải thực trên mặt đất của hai nhóm ảnh lệch nhau.
+        # Không sai, nhưng phải biết mà bật augmentation đổi tỉ lệ lúc train.
+        canh_dai = max(int(x) for x in k.split("x"))
+        d.append(f"- `{k}`: {n} ảnh (resize về cạnh dài {kq['target_long_side']}px "
+                 f"-> tỉ lệ {kq['target_long_side'] / canh_dai:.4f})")
 
     d += ["", "## Số pixel mỗi giá trị mask\n", "| Giá trị | Số pixel | Tỉ lệ |",
           "|---|---|---|"]
@@ -593,28 +648,53 @@ def ghi_bao_cao(kq, duong_dan):
                  for s in ds_split]
             d.append(f"| {g} | " + " | ".join(o) + " |")
 
+    # Bảng "ảnh có / không có lớp": câu hỏi đầu tiên khi chia train/val và khi đọc
+    # mAP. Đếm theo box ĐÃ LỌC, vì ảnh chỉ có một đốm 2px không phải ảnh có nhà.
+    loc_theo_lop = kq.get("so_anh_co_box_loc") or {}
+    if loc_theo_lop and kq["so_anh_tong"]:
+        d += ["", "## Số ảnh có / không có từng lớp\n",
+              f"Đếm trên **{kq['so_anh_tong']}** ảnh, chỉ tính box đã bỏ đốm nhiễu "
+              "(ảnh chỉ có một đốm vài pixel không tính là ảnh có nhà).\n",
+              "| Lớp | Ảnh CÓ ít nhất 1 box | Ảnh KHÔNG có box nào |",
+              "|---|---|---|"]
+        for ten_lop, v in kq["lop"].items():
+            co = loc_theo_lop.get(ten_lop, 0)
+            khong = kq["so_anh_tong"] - co
+            d.append(f"| {ten_lop} | {co:,} ({co / kq['so_anh_tong']:.1%}) "
+                     f"| {khong:,} ({khong / kq['so_anh_tong']:.1%}) |")
+
     d += ["", "## Thống kê theo lớp\n",
           "Cột **p5 đã lọc** là con số dùng để quyết định tiling: đã bỏ các đốm nhỏ "
           "hơn `min_side_px`. Cột **p5 thô** giữ lại để thấy rõ mức nhiễu gán nhãn "
           "trong dữ liệu.\n",
+          "Cột **DT p50 đã lọc** là mốc nhân 3 để gắn cờ \"box to bất thường\"; cột "
+          "**DT p50 thô** in kèm để thấy đốm nhiễu kéo trung vị lệch bao nhiêu.\n",
           "| Lớp | Giá trị mask | Số box | Bỏ do nhiễu | Box/ảnh TB | Box/ảnh max "
-          "| p5 đã lọc | p50 đã lọc | p5 thô | Diện tích p50 | Box to bất thường |",
-          "|---|---|---|---|---|---|---|---|---|---|---|"]
+          "| p5 đã lọc | p50 đã lọc | p5 thô | DT p50 thô | DT p50 đã lọc "
+          "| Box to bất thường |",
+          "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for ten_lop, v in kq["lop"].items():
         if not v.get("so_box"):
-            d.append(f"| {ten_lop} | {v.get('gia_tri_mask', '?')} | 0 | | | | | | | | |")
+            d.append(f"| {ten_lop} | {v.get('gia_tri_mask', '?')} | 0 "
+                     f"| | | | | | | | | |")
             continue
         p5_loc = f"{v['canh_nho_nhat_p5_loc']:.1f}" if v.get("canh_nho_nhat_p5_loc") is not None else "—"
         p50_loc = f"{v['canh_nho_nhat_p50_loc']:.1f}" if v.get("canh_nho_nhat_p50_loc") is not None else "—"
+        dt_loc = f"{v['dien_tich_p50_loc']:.0f}" if v.get("dien_tich_p50_loc") else "—"
         d.append(f"| {ten_lop} | {v['gia_tri_mask']} | {v['so_box']:,} "
                  f"| {v['so_box_nhieu']:,} "
                  f"| {v['box_moi_anh_trung_binh']} | {v['box_moi_anh_lon_nhat']} "
                  f"| {p5_loc} | {p50_loc} "
                  f"| {v['canh_nho_nhat_p5']:.1f} | {v['dien_tich_p50']:.0f} "
-                 f"| {v['so_box_to_bat_thuong']} |")
+                 f"| {dt_loc} | {v['so_box_to_bat_thuong']} |")
 
     if kq["kiem_tra_nuoc"]:
         d += ["", "## Kiểm chứng lớp 1 = nhà NGẬP (component có chạm vùng nước)\n",
+              f"Chỉ chạy trên **{kq.get('so_anh_kiem_tra_nuoc', 0)} ảnh** có vùng nước "
+              f"trong số ít ảnh được lấy mẫu (`eda.num_water_check`) — mẫu nhỏ thì "
+              "tỉ lệ chỉ để xem HƯỚNG, đừng trích như một con số chắc chắn.\n",
+              "Tỉ lệ tính trên **mọi** component, kể cả đốm nhiễu chưa lọc; đốm nhiễu "
+              "hiếm khi chạm nước nên tỉ lệ thật của nhà sẽ **cao hơn** bảng này.\n",
               "| Lớp | Tổng component | Chạm nước | Tỉ lệ |", "|---|---|---|---|"]
         for t, v in kq["kiem_tra_nuoc"].items():
             ty = f"{v['ty_le']:.1%}" if v["ty_le"] is not None else "—"
@@ -627,6 +707,8 @@ def ghi_bao_cao(kq, duong_dan):
     if "can_tach_nha_dinh" in kl:
         d.append(f"- **Tách nhà dính: {'CÓ' if kl['can_tach_nha_dinh'] else 'KHÔNG'}** "
                  f"— {kl['ly_do_tach']}")
+        if kl.get("ly_do_tach_can_kiem_bang_mat"):
+            d.append(f"  - ⚠️ {kl['ly_do_tach_can_kiem_bang_mat']}")
     if "min_area_goi_y" in kl:
         d.append(f"- **min_area đề xuất: {kl['min_area_goi_y']}** — {kl['ly_do_min_area']} "
                  f"(config đang để {kl['min_area_dang_dung']})")
@@ -800,7 +882,9 @@ def main():
         so_ve, canh_bao_kt = 0, []
         for r in rng2.sample(co_box, min(eda["num_overlays"], len(co_box))):
             ok, cb = ve_overlay(zf, r["anh"], r, thu_muc_overlay,
-                                decisions["area_outlier_ratio"])
+                                decisions["area_outlier_ratio"],
+                                kq.get("trung_vi_dien_tich_loc"),
+                                decisions["min_side_px"])
             so_ve += int(ok)
             if cb and cb not in canh_bao_kt:
                 canh_bao_kt.append(cb)
