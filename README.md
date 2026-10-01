@@ -181,7 +181,7 @@ chứng minh điều gì.
 | `src/floodcount/infer/` | `predict.py` (ảnh → box + số đếm), `tta_wbf.py` |
 | `scripts/` | Lệnh CLI mỏng gọi vào `src/`; `cai_moi_truong.py` — cài + vá môi trường Colab, dùng chung cho notebook 00 và 03 |
 | `notebooks/` | Notebook **mỏng** cho Colab — chỉ gọi script, không chứa logic |
-| `tests/` | **449 phép kiểm** trong 8 bộ test, chạy trên máy CPU — không cần GPU, không cần dataset thật (dùng zip giả có cả bẫy ColorMasks). `test_train.py` kiểm được cả trên máy **chưa cài MMDetection**, vì `scripts/train.py` chỉ import mmdet/mmengine bên trong hàm; `test_cai_moi_truong.py` khoá cách dò wheel `mmcv` và ba miếng vá môi trường |
+| `tests/` | **453 phép kiểm** trong 8 bộ test, chạy trên máy CPU — không cần GPU, không cần dataset thật (dùng zip giả có cả bẫy ColorMasks). `test_train.py` kiểm được cả trên máy **chưa cài MMDetection**, vì `scripts/train.py` chỉ import mmdet/mmengine bên trong hàm (và khoá luôn thứ tự build `optim_wrapper` của vòng đo `--dry-run` — lỗi thật đã gặp, §3.8 NOTES); `test_cai_moi_truong.py` khoá cách dò wheel `mmcv` và ba miếng vá môi trường |
 | `outputs/` | Ảnh minh hoạ, overlay, biểu đồ (không đưa lên git) |
 | `requirements-colab.txt` | Bản ghi các gói cài thêm vào Colab (đọc phần đầu file trước khi dùng) |
 

@@ -6,7 +6,7 @@ là ràng buộc thiết kế có chủ ý: nhờ nó mà phần logic thuần P
 được ngay trên máy Windows không cài MMDetection, thay vì phải chờ tới lúc chạy
 trên Colab mới biết sai.
 
-Bốn thứ test này phải khoá:
+Năm thứ test này phải khoá:
 
   1. `cac_ann_can_co` trả về ĐÚNG các tệp annotation mà config dùng. Sai chỗ này
      thì tiền kiểm đi kiểm nhầm tệp — tệ nhất là báo "ĐẠT HẾT" trong khi tệp
@@ -24,6 +24,11 @@ Bốn thứ test này phải khoá:
      nó. Bỏ qua là mmengine gộp dict theo chiều sâu và để nó thừa hưởng từ
      config cha — mmdet không kiểm tra ảnh có tồn tại lúc dựng dataset, nên lỗi
      chỉ nổ ở bước validate, tức là sau khi đã train xong một epoch.
+
+  5. `chay_thu` phải build optim_wrapper y như `Runner.train()` làm. mmengine
+     chỉ build nó bên trong `train()`; vòng đo tự viết mà quên bước này thì
+     `runner.optim_wrapper` vẫn là ConfigDict và `train_step` nổ ngay vòng đầu —
+     lỗi thật đã gặp trên Colab ở GATE 3, sau khi đã dựng xong model.
 
 Chạy:
     py tests/test_train.py
@@ -102,6 +107,45 @@ def main():
         nang = [m for m in sys.modules
                 if m.split(".")[0] in ("mmdet", "mmcv", "mmengine", "torch")]
         kiem(not nang, f"import train.py khong keo thu vien nang, thuc te {nang}")
+
+        print("\n=== 1b. chay_thu phai build optim_wrapper truoc khi do ===")
+        # Loi that da gap tren Colab (GATE 3, o [3.9]): mmengine chi build
+        # optim_wrapper BEN TRONG `Runner.train()` —
+        #     self.optim_wrapper = self.build_optim_wrapper(self.optim_wrapper)
+        # (`Runner.__init__` chi gan). Vong lap do tu viet khong di qua train(),
+        # nen phai tu goi dung ham do; thieu la `train_step` nhan ConfigDict va
+        # no ngay o vong dau bang
+        #     AttributeError: 'ConfigDict' object has no attribute 'optim_context'
+        # Test nay khoa lai: xoa dong build di la FAIL, khong the tai xuat.
+        cay = ast.parse((GOC_REPO / "scripts" / "train.py")
+                        .read_text(encoding="utf-8"))
+        than = next((n for n in ast.walk(cay)
+                     if isinstance(n, ast.FunctionDef) and n.name == "chay_thu"),
+                    None)
+        kiem(than is not None, "tim thay ham chay_thu trong scripts/train.py")
+        if than is not None:
+            goi_build = [n for n in ast.walk(than)
+                         if isinstance(n, ast.Call)
+                         and isinstance(n.func, ast.Attribute)
+                         and n.func.attr == "build_optim_wrapper"]
+            kiem(bool(goi_build),
+                 "chay_thu goi runner.build_optim_wrapper(...)")
+            gan_lai = [n for n in ast.walk(than)
+                       if isinstance(n, ast.Assign)
+                       and any(isinstance(t, ast.Attribute)
+                               and t.attr == "optim_wrapper"
+                               for t in n.targets)]
+            kiem(bool(gan_lai),
+                 "... va gan ket qua lai vao runner.optim_wrapper")
+            # train_step phai nhan optim_wrapper qua keyword — bo di la quay
+            # ve dung loi cu.
+            ts = [n for n in ast.walk(than)
+                  if isinstance(n, ast.Call)
+                  and isinstance(n.func, ast.Attribute)
+                  and n.func.attr == "train_step"]
+            kiem(bool(ts) and all(any(k.arg == "optim_wrapper"
+                                      for k in n.keywords) for n in ts),
+                 "moi loi goi train_step deu truyen keyword optim_wrapper")
 
         print("\n=== 2. cac_ann_can_co: tim dung tep annotation ===")
         # Duong dan tuong doi -> giai theo data_root cua CHINH dataset do

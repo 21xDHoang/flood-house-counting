@@ -938,12 +938,12 @@ Muốn giữ nhiều checkpoint hơn thì sửa `max_keep_ckpts` ở mục 8 c�
 | `test_mask_to_coco.py` | 106 |
 | `test_audit.py` | 103 |
 | `test_cai_moi_truong.py` | 59 |
-| `test_train.py` | 43 |
+| `test_train.py` | 47 |
 | `test_kiem_tra.py` | 41 |
 | `test_anchor.py` | 39 |
 | `test_overfit.py` | 37 |
 | `test_photometric.py` | 21 |
-| **Tổng** | **449** |
+| **Tổng** | **453** |
 
 Cả 8 bộ **PASS** ngày 01/10/2026. `test_train.py` chạy được cả trên máy sạch
 chưa cài MMDetection vì `scripts/train.py` chỉ import mmdet/mmengine **bên trong
@@ -1017,12 +1017,45 @@ thay vì bỏ qua im lặng: không khai thì không có cách nào biết ảnh
 
 ### 3.7 Phần còn lại của Phase 3
 
-Chưa chạy gì trên Colab. Thứ tự trong `notebooks/03_train.ipynb`: cài môi trường
-(ô `[3.3b]` gọi `scripts/cai_moi_truong.py` — §1.9) → giải nén dataset →
-`kiem_tra_du_lieu` → `kiem_anchor` → `tao_overfit20` → `train.py --dry-run`
-(đo thời gian một epoch thật, chưa ghi checkpoint) → train overfit 20 ảnh →
-**dừng và báo cáo lại**. Train thật (Phase 4) chỉ bắt đầu sau khi chốt số epoch
-từ phép đo `--dry-run`.
+GATE 3 đang chạy trên Colab (01/10/2026). Đã báo cáo về: `[3.6]`
+`kiem_tra_du_lieu` (ĐẠT HẾT), `[3.7]` `kiem_anchor` (ĐẠT — số đo ở §3.3),
+`[3.8]` dựng tập overfit (20 ảnh / 125 box, seed 42, script tự đọc lại từ đĩa
+xác nhận khớp). Còn lại: `[3.9]` `train.py --dry-run` — chạy lần đầu hỏng, xem
+§3.8 — rồi `[3.10]` train overfit 20 ảnh, **dừng và báo cáo lại**. Train thật
+(Phase 4) chỉ bắt đầu sau khi chốt số epoch từ phép đo `--dry-run`.
+
+### 3.8 Lỗi thật đầu tiên trên Colab: `optim_wrapper` chưa được build (01/10/2026)
+
+Ô `[3.9]` (`train.py --dry-run`) chết ngay vòng lặp đầu tiên:
+
+    AttributeError: 'ConfigDict' object has no attribute 'optim_context'
+
+Tiền kiểm `[1]`–`[6]` ĐẠT HẾT và model dựng xong trong 3,2 giây — nên lỗi không
+nằm ở config, dataset hay model. Đọc source mmengine 0.10.7 (tag `v0.10.7` trên
+GitHub; máy cá nhân không cài mmengine) thì ra: `Runner.__init__` **chỉ gán**
+`self.optim_wrapper = optim_wrapper`, còn việc build thật chỉ xảy ra bên trong
+`Runner.train()`:
+
+    self.optim_wrapper = self.build_optim_wrapper(self.optim_wrapper)
+
+Vòng lặp đo trong `chay_thu` tự viết, không đi qua `train()`, nên
+`runner.optim_wrapper` vẫn là ConfigDict và `train_step` nổ ngay khi gọi
+`optim_wrapper.optim_context(self)`.
+
+**Sửa:** gọi đúng hàm mà `train()` gọi —
+`runner.optim_wrapper = runner.build_optim_wrapper(runner.optim_wrapper)` — trước
+vòng lặp. Hàm này đi qua `constructor: LearningRateDecayOptimizerConstructor` của
+mmdet và bọc `AmpOptimWrapper`, nên phép đo vẫn trung thực với train thật.
+
+**Khoá lại bằng test:** `tests/test_train.py` mục 1b (4 phép kiểm) dùng AST để
+buộc `chay_thu` phải (a) gọi `build_optim_wrapper`, (b) gán kết quả lại vào
+`runner.optim_wrapper`, (c) truyền keyword `optim_wrapper` cho mọi lời gọi
+`train_step`. Đã kiểm âm: xoá đúng dòng build khỏi nguồn thì phép kiểm (a) và
+(b) chuyển thành FAIL — test không phải loại "xanh cả khi bỏ lỗi ra".
+
+Bài học giống §3.6: **chép đúng một dòng của vòng lặp thật là chưa đủ** — phải
+chép cả những gì `Runner.train()` làm TRƯỚC vòng lặp. Bài học phụ: phép đo
+`--dry-run` đáng giá đúng như thiết kế — nó chết trước khi tốn một epoch GPU nào.
 
 ---
 
@@ -1076,7 +1109,10 @@ từ phép đo `--dry-run`.
    - **Rà soát trước khi chạy Colab tìm được một lỗi thật** — `val_dataloader` của
      `overfit20.py` thừa hưởng nhầm `data_prefix=images/val/`. Đã sửa, khoá bằng test, và
      thêm **mục [2b]** vào tiền kiểm để bắt được cả họ lỗi này ở config khác; chi tiết ở
-     **§3.6**. Số phép kiểm: **449** (§3.5).
+     **§3.6**.
+   - **Lỗi thật đầu tiên trên Colab (ô `[3.9]`)**: vòng đo `--dry-run` quên build
+     `optim_wrapper` — mmengine chỉ build nó trong `Runner.train()`. Đã sửa, khoá bằng
+     4 phép kiểm AST (đã kiểm âm). Số phép kiểm: **453** (§3.5). Chi tiết ở **§3.8**.
 6. **Bước kế tiếp ngay: chạy `notebooks/03_train.ipynb` trên Colab T4 (Phase 3) — MỘT tab.**
    Ô `[3.3b]` tự cài môi trường (gọi `scripts/cai_moi_truong.py`, §1.9) nên **không phải mở
    notebook 00 ở tab thứ hai**. Thứ tự các ô và thời gian dự kiến ghi trong README. Dừng ở

@@ -482,6 +482,11 @@ def chay_thu(cfg, so_vong, so_vong_khoi_dong=2):
     `Runner.train()` còn gọi `_maybe_compile('train_step')`, nhưng hàm đó thoát
     ngay khi config không có khoá `compile` (đã đọc source) — config đồ án không
     có, nên bỏ qua được.
+
+    Không step `param_scheduler`: LR giữ nguyên giá trị lúc dựng optimizer (không
+    mô phỏng warmup/giảm LR). Đủ cho ba thứ phép đo này cần — thời gian/vòng,
+    VRAM đỉnh, bắt loss = NaN — nhưng đừng đọc số loss ở đây như loss của train
+    thật.
     """
     import torch
     from mmengine.runner import Runner
@@ -501,6 +506,17 @@ def chay_thu(cfg, so_vong, so_vong_khoi_dong=2):
         t0 = time.perf_counter()
         runner = Runner.from_cfg(cfg)
         print(f"    dựng xong sau {time.perf_counter() - t0:.1f}s")
+
+        # mmengine CHỈ build optim_wrapper bên trong `Runner.train()`:
+        #     self.optim_wrapper = self.build_optim_wrapper(self.optim_wrapper)
+        # (đã đọc source 0.10.7: `Runner.__init__` chỉ gán, không build.) Vòng
+        # lặp tự viết ở đây không đi qua `train()`, nên thiếu dòng dưới thì
+        # `runner.optim_wrapper` vẫn là ConfigDict và `train_step` nổ ngay vòng
+        # đầu — đúng lỗi đã gặp trên Colab ở GATE 3:
+        #     AttributeError: 'ConfigDict' object has no attribute 'optim_context'
+        # Gọi đúng hàm mà `train()` gọi -> AmpOptimWrapper thật, kể cả
+        # constructor LearningRateDecayOptimizerConstructor và tích luỹ 4 vòng.
+        runner.optim_wrapper = runner.build_optim_wrapper(runner.optim_wrapper)
 
         runner.model.train()
         if torch.cuda.is_available():
