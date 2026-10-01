@@ -136,14 +136,16 @@ con số thứ hai là thật chứ không phải lỗi đếm.
 
 ### Chạy Phase 3 (cấu hình model & sanity check)
 
-**Cần GPU T4** (chỉ ở ô `[3.9]` trở đi) và **cần cài môi trường trước** — chạy ô `[0.6]`
-của `notebooks/00_colab_setup.ipynb` trong cùng phiên, hoặc chạy cả notebook 00 từ trên
-xuống. Không cần `floodnet_raw.zip` 13 GB nữa, chỉ cần `floodnet_coco.zip` 1,86 GB.
+**Cần GPU T4** (chỉ ở ô `[3.9]` trở đi). Môi trường **tự cài ngay trong notebook này**:
+ô `[3.3b]` gọi `scripts/cai_moi_truong.py` — cùng script mà notebook 00 dùng — nên chỉ
+cần **một tab Colab**, không phải mở notebook 00 ở tab thứ hai. Không cần
+`floodnet_raw.zip` 13 GB nữa, chỉ cần `floodnet_coco.zip` 1,86 GB.
 
 Mở `notebooks/03_train.ipynb` và chạy từ trên xuống:
 
 | Ô | Việc | Thời gian |
 |---|---|---|
+| `[3.3b]` | Cài môi trường (đã cài rồi thì tự bỏ qua) | 3–5 phút |
 | `[3.5]` | Giải nén dataset vào `/content` + đối chiếu đúng 2.343 ảnh / 6.301 box | 1–2 phút |
 | `[3.6]` | Kiểm dữ liệu: tên lớp, **ảnh có thật trên đĩa**, số box mmdet thực nhận | ~1–2 phút |
 | `[3.7]` | Đo dải anchor của RPN trên box thật | vài giây |
@@ -177,9 +179,9 @@ chứng minh điều gì.
 | `src/floodcount/models/` | `transforms.py` — transform tự viết đăng ký vào registry của mmdet |
 | `src/floodcount/eval/` | `coco_eval.py` (mAP), `count_eval.py` (MAE/RMSE đếm), `error_analysis.py` |
 | `src/floodcount/infer/` | `predict.py` (ảnh → box + số đếm), `tta_wbf.py` |
-| `scripts/` | Lệnh CLI mỏng gọi vào `src/` |
+| `scripts/` | Lệnh CLI mỏng gọi vào `src/`; `cai_moi_truong.py` — cài + vá môi trường Colab, dùng chung cho notebook 00 và 03 |
 | `notebooks/` | Notebook **mỏng** cho Colab — chỉ gọi script, không chứa logic |
-| `tests/` | **390 phép kiểm** trong 7 bộ test, chạy trên máy CPU — không cần GPU, không cần dataset thật (dùng zip giả có cả bẫy ColorMasks). `test_train.py` kiểm được cả trên máy **chưa cài MMDetection**, vì `scripts/train.py` chỉ import mmdet/mmengine bên trong hàm |
+| `tests/` | **449 phép kiểm** trong 8 bộ test, chạy trên máy CPU — không cần GPU, không cần dataset thật (dùng zip giả có cả bẫy ColorMasks). `test_train.py` kiểm được cả trên máy **chưa cài MMDetection**, vì `scripts/train.py` chỉ import mmdet/mmengine bên trong hàm; `test_cai_moi_truong.py` khoá cách dò wheel `mmcv` và ba miếng vá môi trường |
 | `outputs/` | Ảnh minh hoạ, overlay, biểu đồ (không đưa lên git) |
 | `requirements-colab.txt` | Bản ghi các gói cài thêm vào Colab (đọc phần đầu file trước khi dùng) |
 

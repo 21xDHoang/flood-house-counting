@@ -313,6 +313,35 @@ xong không có gì để in" — mất hẳn manh mối để chẩn đoán.
 — trông như lỗi code nhưng thật ra chỉ là chưa chạy ô cấu hình. Ba ô chạy nay đều
 tự kiểm và báo rõ phải chạy ô `[1.1]` trước.
 
+### 1.9 Cài đặt chuyển vào `scripts/cai_moi_truong.py` — một tab Colab là đủ (01/10/2026)
+
+**Ràng buộc mới:** người dùng chỉ mở được **một tab Colab** tại một thời điểm. Colab
+tính một notebook = một tab = **một runtime**, và bản miễn phí chỉ cho một GPU một
+lúc — mở notebook 00 ở tab thứ hai là dựng runtime mới và **phiên GPU đang chạy ở tab
+kia bị giành mất**. Cách cũ ("chạy ô `[0.6]` của notebook 00 trước, rồi quay lại
+notebook 03") vì thế không thực hiện được.
+
+**Đã sửa:** toàn bộ logic cài đặt + ba miếng vá chuyển từ ô `[0.6]` của notebook 00
+vào `scripts/cai_moi_truong.py`. Notebook 00 ô `[0.6]` và notebook 03 ô `[3.3b]` cùng
+gọi script này, nên **mỗi notebook tự cài được trong chính tab của nó**.
+
+- Phiên bản thư viện giờ nằm ở **một chỗ duy nhất** trong script — trước đây khai ở
+  notebook 00 ô `[0.2]`, notebook 03 không nhìn thấy được.
+- Script tự dò tổ hợp Python/torch/CUDA của runtime rồi tìm wheel `mmcv` khớp, nhận
+  `--drive-dir` để dùng cache wheel trên Drive, và ghi dấu `/content/.floodcount_env_ready`
+  để lần chạy sau **bỏ qua phần cài** (chỉ chạy lại phần vá).
+- Ô gọi script **bắt buộc** tự đọc ống dẫn rồi `print` (bẫy §1.8) — nếu không thì mất
+  3–5 phút nhìn ô output trống.
+- Sau khi script chạy xong, ô gọi **phải xoá `mmpretrain` khỏi `sys.modules`**: nếu ô
+  `[3.4]` đã chạy từ trước (nó nổ vì thiếu gói), gói `mmpretrain` vẫn nằm trong cache
+  với giá trị cờ `WITH_MULTIMODAL` **cũ**, và miếng vá coi như không có tác dụng.
+
+`tests/test_cai_moi_truong.py` (59 phép kiểm) khoá lại: cách dò tên wheel — kể cả bẫy
+`%2B` trong `href` của trang index và bẫy tiền tố (`pt2.1.1` khớp nhầm trong
+`pt2.1.10`) — ba miếng vá đúng chỗ và **không vá nhầm file**, mã thoát của
+`--xem-phien-ban`, và ràng buộc **không import `torch` ở cấp module** (script còn dùng
+để in phiên bản khi chưa cài gì).
+
 ---
 
 ## 2. Dataset FloodNet
@@ -852,17 +881,23 @@ Muốn giữ nhiều checkpoint hơn thì sửa `max_keep_ckpts` ở mục 8 c�
 |---|---|
 | `test_mask_to_coco.py` | 106 |
 | `test_audit.py` | 103 |
+| `test_cai_moi_truong.py` | 59 |
+| `test_train.py` | 43 |
 | `test_kiem_tra.py` | 41 |
 | `test_anchor.py` | 39 |
 | `test_overfit.py` | 37 |
-| `test_train.py` | 43 |
 | `test_photometric.py` | 21 |
-| **Tổng** | **390** |
+| **Tổng** | **449** |
 
-Cả 7 bộ **PASS** ngày 01/10/2026. `test_train.py` chạy được cả trên máy sạch
+Cả 8 bộ **PASS** ngày 01/10/2026. `test_train.py` chạy được cả trên máy sạch
 chưa cài MMDetection vì `scripts/train.py` chỉ import mmdet/mmengine **bên trong
 hàm** — đây là ràng buộc thiết kế có chủ ý, và có một phép kiểm khoá đúng điều đó
 (nếu ai đó chuyển các import lên đầu tệp, test sẽ đỏ ngay).
+
+Ba bộ in tiếng Việt (`test_cai_moi_truong.py`, `test_kiem_tra.py`, `test_overfit.py`)
+trước đây nổ `UnicodeEncodeError` trên console Windows — chúng thiếu đoạn
+`sys.stdout.reconfigure(encoding="utf-8")` mà §1.7 đã chốt là bắt buộc. Đã chép vào
+`main()` của cả ba.
 
 ### 3.6 Một lỗi tìm được TRƯỚC khi chạy Colab — và một test suýt bỏ lọt nó (01/10/2026)
 
@@ -926,8 +961,9 @@ thay vì bỏ qua im lặng: không khai thì không có cách nào biết ảnh
 
 ### 3.7 Phần còn lại của Phase 3
 
-Chưa chạy gì trên Colab. Thứ tự trong `notebooks/03_train.ipynb`: giải nén dataset
-→ `kiem_tra_du_lieu` → `kiem_anchor` → `tao_overfit20` → `train.py --dry-run`
+Chưa chạy gì trên Colab. Thứ tự trong `notebooks/03_train.ipynb`: cài môi trường
+(ô `[3.3b]` gọi `scripts/cai_moi_truong.py` — §1.9) → giải nén dataset →
+`kiem_tra_du_lieu` → `kiem_anchor` → `tao_overfit20` → `train.py --dry-run`
 (đo thời gian một epoch thật, chưa ghi checkpoint) → train overfit 20 ảnh →
 **dừng và báo cáo lại**. Train thật (Phase 4) chỉ bắt đầu sau khi chốt số epoch
 từ phép đo `--dry-run`.
@@ -984,8 +1020,10 @@ từ phép đo `--dry-run`.
    - **Rà soát trước khi chạy Colab tìm được một lỗi thật** — `val_dataloader` của
      `overfit20.py` thừa hưởng nhầm `data_prefix=images/val/`. Đã sửa, khoá bằng test, và
      thêm **mục [2b]** vào tiền kiểm để bắt được cả họ lỗi này ở config khác; chi tiết ở
-     **§3.6**. Số phép kiểm: **390** (§3.5).
-6. **Bước kế tiếp ngay: chạy `notebooks/03_train.ipynb` trên Colab T4 (Phase 3).** Thứ tự các
-   ô và thời gian dự kiến ghi trong README. Dừng ở phép thử overfit 20 ảnh và báo cáo lại
-   (số epoch, loss, thời gian một epoch đo được ở ô `--dry-run`) trước khi sang Phase 4.
+     **§3.6**. Số phép kiểm: **449** (§3.5).
+6. **Bước kế tiếp ngay: chạy `notebooks/03_train.ipynb` trên Colab T4 (Phase 3) — MỘT tab.**
+   Ô `[3.3b]` tự cài môi trường (gọi `scripts/cai_moi_truong.py`, §1.9) nên **không phải mở
+   notebook 00 ở tab thứ hai**. Thứ tự các ô và thời gian dự kiến ghi trong README. Dừng ở
+   phép thử overfit 20 ảnh và báo cáo lại (số epoch, loss, thời gian một epoch đo được ở ô
+   `--dry-run`) trước khi sang Phase 4.
    Không đụng tới `floodnet_raw.zip` 13 GB nữa — chỉ cần `floodnet_coco.zip` 1,86 GB.

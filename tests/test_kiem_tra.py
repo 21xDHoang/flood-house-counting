@@ -129,6 +129,14 @@ def chay_cli(config, config_mmdet):
 # ===========================================================================
 
 def main():
+    # Console Windows mặc định là cp1252: in chữ có dấu là nổ UnicodeEncodeError
+    # giữa chừng. Đổi sang UTF-8 ngay từ đầu (Colab vốn đã là UTF-8).
+    for luong in (sys.stdout, sys.stderr):
+        try:
+            luong.reconfigure(encoding="utf-8")
+        except (AttributeError, OSError):
+            pass
+
     tmp = tempfile.mkdtemp(prefix="kiem_tra_test_")
     loi = []
 

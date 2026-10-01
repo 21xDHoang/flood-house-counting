@@ -72,6 +72,14 @@ def tao_coco_gia(so_co_ngap=20, so_chi_khong=12, so_rong=8,
 
 
 def main():
+    # Console Windows mặc định là cp1252: in chữ có dấu là nổ UnicodeEncodeError
+    # giữa chừng. Đổi sang UTF-8 ngay từ đầu (Colab vốn đã là UTF-8).
+    for luong in (sys.stdout, sys.stderr):
+        try:
+            luong.reconfigure(encoding="utf-8")
+        except (AttributeError, OSError):
+            pass
+
     tmp = tempfile.mkdtemp(prefix="overfit_test_")
     loi = []
 
