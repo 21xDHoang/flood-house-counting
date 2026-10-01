@@ -1089,6 +1089,35 @@ worker và autotune cuDNN.
 2. Ô `[3.4]` in `pycocotools : ?` — thư viện không có `__version__`; đọc bằng
    `importlib.metadata.version("pycocotools")` sẽ ra 2.0.11. Chưa sửa (dọn sau).
 
+### 3.10 Colab ngắt giữa chừng thì resume khôi phục được gì (01/10/2026)
+
+Đọc source mmengine 0.10.7 (tag `v0.10.7`) trước khi đốt 6 giờ GPU:
+
+| Thứ | Có trong checkpoint? | Resume khôi phục? |
+|---|---|---|
+| Trọng số model | có | có |
+| `epoch` / `iter` (từ `meta`) | có | có |
+| Lịch LR (`param_schedulers`) | **có** — `save_param_scheduler` mặc định `True`, độc lập với `save_optimizer` | có |
+| Trạng thái optimizer (AdamW moments) | **không** — config để `save_optimizer=False` | **bỏ qua im lặng** |
+
+Ba chi tiết kiểm bằng cách đọc code:
+
+- `Runner.resume()` chỉ nạp optimizer khi `'optimizer' in checkpoint`; **không có
+  nhánh `else`** → checkpoint thiếu khoá đó thì không lỗi, không cảnh báo.
+- `ParamSchedulerHook` gọi `scheduler.step()` **không tham số** — vị trí trong lịch
+  nằm ở bộ đếm nội bộ `_global_step` của scheduler, KHÔNG đọc `runner.epoch`. Nếu
+  `param_schedulers` không được lưu thì mốc giảm LR [16, 22] sẽ lệch. Ở config này
+  nó được lưu (mặc định), nên lịch LR resume ĐÚNG.
+- Checkpoint "best" (`best_coco_bbox_mAP_*`) **luôn** bị ép `save_optimizer=False`
+  và `save_param_scheduler=False` — chỉ để suy luận, không resume được. Resume dùng
+  checkpoint epoch mới nhất, qua tệp `last_checkpoint` (hook ghi vì `save_last=True`).
+
+**Kết luận cho lần train thật:** Colab ngắt giữa chừng → chạy lại ô `[3.11]` là
+tiếp đúng epoch và đúng lịch LR; chỉ mất trạng thái AdamW (vài trăm vòng đầu sau
+resume "khởi động lại" quán tính — chấp nhận được, không đáng đánh đổi bằng việc
+ghi thêm ~600 MB optimizer lên Drive mỗi epoch). Muốn train lại từ đầu: xoá
+`runs/train/e1_cascade_convnext_t` trên Drive.
+
 ---
 
 ## 4. Việc tiếp theo
