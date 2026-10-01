@@ -891,6 +891,31 @@ những căn nhà to nhất, nên **không cần sửa anchor**. `scripts/kiem_a
 lại điều này trên box thật và in bảng phủ theo từng mức lưới; chạy nó trước khi
 train để báo cáo có số liệu thay vì lập luận suông.
 
+**Đã đo thật — 3.779 box train, trên Colab 01/10/2026, mã thoát 0:**
+
+| Số đo | Giá trị |
+|---|---|
+| Cạnh trung vị của box | 164px (p95 cạnh lớn hơn: 493px) |
+| IoU lớn nhất đạt được | nhỏ nhất 0,105 · p5 0,510 · **trung vị 0,688** · p95 0,886 |
+| Box đạt IoU ≥ 0,3 | **99,3%** |
+| Box đạt IoU ≥ 0,5 | **97,6%** |
+| Box đạt IoU ≥ 0,7 | 47,6% |
+| Theo lớp (đạt 0,5) | flooded 98,8% · non_flooded 96,4% |
+
+Anchor 256×256 (stride 32) là anchor tốt nhất cho 1.150 box; ba anchor lớn nhất
+(724×362, 512×512, 362×724) phủ 72 + 191 + 34 = **297 box to**. Tức đuôi nhà to —
+`kiem_tra_du_lieu` báo cạnh nhỏ **lớn nhất 951px** (§3.5) — **vẫn có anchor khớp**.
+Kết luận "không cần nới dải anchor" giờ có số liệu chống lưng, không còn là lập luận
+từ p90.
+
+Một chi tiết đáng ghi: bảng "IoU lớn nhất theo lưới anchor thật" **trùng khít** bảng
+"giới hạn trên khi đặt anchor cùng tâm box" (0,688 · 99,3% · 97,6% · 47,6%) — lưới
+anchor dày đủ để chuyện lệch tâm không làm mất IoU. Giới hạn nằm ở **hình dạng
+anchor**, không ở mật độ lưới.
+
+**2,4% box (≈91 box) không đạt IoU 0,5** — ghi lại làm đầu vào cho phân tích lỗi ở
+Phase 6 (`docs/RESULTS.md`), đừng để nó thành câu hỏi mở khi đã train xong.
+
 ### 3.4 Checkpoint ghi ra Drive — và cách đổi lại
 
 `default_hooks.checkpoint` đặt `max_keep_ckpts=2` + `save_last=True` +
