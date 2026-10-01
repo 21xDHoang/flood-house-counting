@@ -779,6 +779,37 @@ dọn: `pkill -f build_coco.py` rồi kiểm lại bằng `ps`.
 sẵn). Từ Phase 3 chỉ cần giải nén tệp này vào `/content`, **không cần tới
 `floodnet_raw.zip` 13 GB** nữa.
 
+### 2.8 Dựng lại Phase 1 + 2 trên máy cá nhân (CPU) — đối chiếu GATE 2 (01/10/2026)
+
+Người dùng tải `floodnet_raw.zip` (13 GB) về máy và đưa đường dẫn. Hoá ra **cả hai phase
+chạy được trên CPU, không cần Colab**: `audit.py` và `build_coco.py` đọc thẳng trong zip
+chứ không giải nén. Chạy đủ 2.343 ảnh, mã thoát 0.
+
+| Số | GATE 2 (Colab, 30/09) | Dựng lại trên máy (01/10) |
+|---|---|---|
+| Ảnh mỗi split | 448 / 1.445 / 450 | 448 / 1.445 / 450 |
+| Box nhà ngập | 3.088 | 3.088 |
+| Box nhà không ngập | 3.213 | 3.213 |
+| Tổng box | 6.301 | 6.301 |
+| Ảnh có nhà ngập | 245 | 245 |
+| Box chạm mép | 2.953 | 2.953 |
+| Phase 1 tính lại (chỉ lọc cạnh) | 3.101 + 3.241 = 6.342 | 6.342 |
+| Đối chiếu Phase 1 | +0 / +0 | +0 / +0 |
+
+**Khớp từng con số.** Đây là phép kiểm tái lập độc lập: cùng input và cùng code nhưng
+khác máy, khác phiên chạy — kết quả không đổi. Hệ quả vận hành: từ giờ Phase 1/2 **không
+cần chiếm GPU Colab** nữa, chạy trên máy rồi chỉ đưa gói kết quả lên Drive.
+
+Gói dựng lại: `floodnet_coco.zip` — **4.692 mục, 1,86 GB**, giống hệt bản Colab
+(2.343 ảnh + 2.343 mask + 3 JSON + 3 CSV, `ZIP_STORED`; không tên tệp nào chứa `\`, tức
+không dính bẫy đường dẫn Windows). Đã kiểm **ruột gói** chứ không chỉ đếm tệp: mọi
+`file_name` trong JSON đều có tệp ảnh trong zip, `image_id` không mồ côi, `bbox` dương,
+category đúng thứ tự (`flooded_building` trước).
+
+*Một chỗ dễ kiểm nhầm:* `file_name` trong JSON để **trần** (`train_10165.jpg`), mmdet ghép
+với `data_prefix.img = images/<split>/`. Đem so thẳng `file_name` với danh sách tệp trong
+zip thì **cả 2.343 ảnh đều báo "thiếu"** — lỗi của phép kiểm, không phải của dữ liệu.
+
 ---
 
 ## 3. Phase 3 — cấu hình model & phép thử trước khi train (30/09/2026)
