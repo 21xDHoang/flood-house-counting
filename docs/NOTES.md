@@ -752,7 +752,189 @@ sẵn). Từ Phase 3 chỉ cần giải nén tệp này vào `/content`, **khôn
 
 ---
 
-## 3. Việc tiếp theo
+## 3. Phase 3 — cấu hình model & phép thử trước khi train (30/09/2026)
+
+Trạng thái: **code đã viết xong, test xanh trên máy CPU; CHƯA chạy gì trên Colab**
+— chưa train, chưa chạy phép thử overfit. Mọi con số ở mục này là số **đọc được
+từ source** hoặc **đo trên máy**, không phải kết quả train.
+
+### 3.1 Đã viết những gì
+
+| Tệp | Vai trò |
+|---|---|
+| `configs/mmdet/cascade_convnext_t_floodnet.py` | Config chính — kế thừa `mmdet::convnext/cascade-mask-rcnn_...` rồi **bỏ toàn bộ nhánh mask**, còn 2 lớp |
+| `configs/mmdet/overfit20.py` | Config con cho phép thử học vẹt 20 ảnh |
+| `src/floodcount/data/kiem_tra.py` | Chốt chặn dữ liệu: đối chiếu file JSON với config train **trước khi** train |
+| `src/floodcount/data/overfit.py` | Dựng `instances_overfit20.json` (20 ảnh chọn theo seed) |
+| `src/floodcount/data/photometric.py` | Tăng sáng/tương phản nhẹ, thuần numpy |
+| `src/floodcount/models/transforms.py` | Lớp `TangSangNhe` — "keo" nối hàm trên vào pipeline mmdet |
+| `scripts/kiem_tra_du_lieu.py`, `kiem_anchor.py`, `tao_overfit20.py`, `train.py` | CLI mỏng |
+| `notebooks/03_train.ipynb` | Notebook chạy trên Colab |
+| `tests/test_train.py`, `test_kiem_tra.py`, `test_anchor.py`, `test_overfit.py`, `test_photometric.py` | 5 bộ test mới, tất cả chạy được trên CPU |
+
+### 3.2 Năm điều phải tra source mới biết (không suy đoán)
+
+**(a) `custom_imports` do `Config.fromfile` chạy, KHÔNG phải `Runner`.**
+`mmengine/config/config.py` (0.10.7) có tham số `import_custom_modules=True` và
+thân hàm gọi `import_modules_from_strings(**cfg_dict['custom_imports'])`; `Runner`
+không đụng tới khoá này. Hệ quả thực tế: `src/` phải nằm trong `sys.path`
+**TRƯỚC dòng `Config.fromfile(...)`**, nếu không thì config đồ án (có khai
+`floodcount.models.transforms`) chết ngay lúc nạp với `Failed to import`.
+`scripts/train.py` vì thế chèn `sys.path` ở đầu tệp, trước mọi import khác.
+
+**(b) Cú pháp `mmdet::<đường dẫn>` CHỈ dùng được bên trong `_base_`.**
+`_file2dict` bắt đầu bằng `filename = osp.abspath(osp.expanduser(filename))` rồi
+`check_file_exist(filename)`, còn nhánh xử lý `'::'` nằm **trong vòng lặp `_base_`**.
+Nên `Config.fromfile('mmdet::convnext/...')` **không** chạy được, nhưng
+`_base_ = ['mmdet::convnext/...']` trong config đồ án thì chạy. Đây chính là lý do
+config đồ án **không cần clone repo mmdet**, trong khi ô smoke test của notebook 00
+(cần mở trực tiếp một tệp cấp cao nhất) thì vẫn cần.
+
+**(c) `resume=True` an toàn cả khi chưa có checkpoint nào.**
+Config `mmdet::convnext/...` **không** đặt `load_from` — trọng số ImageNet đến từ
+`init_cfg=dict(type='Pretrained', checkpoint='...convnext-tiny...in1k....pth',
+prefix='backbone.')` gắn trên chính backbone. `Runner.load_or_resume` xử lý đúng
+trường hợp này: `resume=True` + `load_from is None` → `find_latest_checkpoint()`;
+không tìm thấy thì không nạp gì và **không sập**. Nhờ vậy, chạy lại notebook 03
+sau khi Colab ngắt phiên sẽ tự tiếp tục từ checkpoint mới nhất mà không phải đổi
+tham số nào.
+
+**(d) `RandomChoiceResize` bắt buộc phải ghi `keep_ratio=True`.**
+Đây là lớp của **mmcv** (không phải mmdet) và nó tự dựng đối tượng `Resize` qua
+registry gốc — mà `Resize` của mmcv có `keep_ratio` mặc định **False**, ngược với
+`Resize` của mmdet. Bỏ tham số này thì ảnh bị bóp méo tỉ lệ mà **không có lỗi nào
+báo**, vì box vẫn được scale theo tỉ lệ của từng trục. `scripts/train.py` in ra
+`keep_ratio` của mọi transform có "esize" trong tên và cảnh báo nếu khác `True`.
+
+**(e) Bỏ ảnh rỗng là mặc định của mmdet — đồ án cố ý tắt.**
+`filter_cfg=dict(filter_empty_gt=False, min_size=32)`. Khoảng một nửa FloodNet
+không có căn nhà nào; bỏ các ảnh đó thì model chỉ học "ảnh nào cũng có nhà",
+trong khi đầu ra của đồ án là **đếm trên mọi ảnh**, kể cả ảnh không có nhà.
+`scripts/train.py` cảnh báo nếu giá trị này khác `False`.
+
+### 3.3 Dải anchor của RPN — đo, không đoán
+
+Config đồ án thừa hưởng RPN từ bản gốc nên mở file `.py` của đồ án sẽ **không
+thấy** `scales`/`ratios`. Đọc từ config gốc: `scales=[8]`, `ratios=[0.5, 1, 2]`,
+`strides=[4, 8, 16, 32, 64]`, **không** có `base_sizes`; `AnchorGenerator.__init__`
+đặt `base_sizes = [min(stride) for stride in strides]` → 4/8/16/32/64. Nhân với
+`scale = 8`, rồi với `1/√ratio` và `√ratio`:
+
+| Mức | Lưới | Anchor dẹt nhất | Anchor cao nhất |
+|---|---|---|---|
+| 1 | stride 4 | 45,3 × 22,6 | 22,6 × 45,3 |
+| 5 | stride 64 | 724,1 × 362,0 | 362,0 × 724,1 |
+
+Tất cả **15 hình dạng**. Cạnh box thật của FloodNet: **trung vị 186px, p90
+348×336** (§2.7). Dải anchor phủ từ 22,6px tới 724,1px — **thừa sức** chứa cả
+những căn nhà to nhất, nên **không cần sửa anchor**. `scripts/kiem_anchor.py` đo
+lại điều này trên box thật và in bảng phủ theo từng mức lưới; chạy nó trước khi
+train để báo cáo có số liệu thay vì lập luận suông.
+
+### 3.4 Checkpoint ghi ra Drive — và cách đổi lại
+
+`default_hooks.checkpoint` đặt `max_keep_ckpts=2` + `save_last=True` +
+`save_best='coco/bbox_mAP'`, và **`save_optimizer=False`**. Lý do: model ~54
+triệu tham số nên checkpoint chỉ trọng số ≈ **216 MB**, thêm trạng thái AdamW
+(`m` và `v`) là ≈ **432 MB** nữa; ghi thêm chừng đó mỗi epoch lên Drive qua FUSE
+là quá đắt cho một lợi ích duy nhất là resume mượt hơn. `Runner.resume()` có
+guard `if 'optimizer' in checkpoint`, nên resume từ checkpoint thiếu optimizer
+**không sập** — chỉ là các moment của AdamW khởi động lại, ảnh hưởng vài chục
+vòng lặp đầu.
+
+Muốn giữ nhiều checkpoint hơn thì sửa `max_keep_ckpts` ở mục 8 của
+`configs/mmdet/cascade_convnext_t_floodnet.py`; muốn resume mượt hơn nữa thì đổi
+`save_optimizer=True` (chỉ nên làm nếu chạy dài ngày).
+
+### 3.5 Test đã chạy trên máy (CPU, không cần GPU và không cần dataset thật)
+
+| Bộ test | Số phép kiểm |
+|---|---|
+| `test_mask_to_coco.py` | 106 |
+| `test_audit.py` | 103 |
+| `test_kiem_tra.py` | 41 |
+| `test_anchor.py` | 39 |
+| `test_overfit.py` | 37 |
+| `test_train.py` | 43 |
+| `test_photometric.py` | 21 |
+| **Tổng** | **390** |
+
+Cả 7 bộ **PASS** ngày 01/10/2026. `test_train.py` chạy được cả trên máy sạch
+chưa cài MMDetection vì `scripts/train.py` chỉ import mmdet/mmengine **bên trong
+hàm** — đây là ràng buộc thiết kế có chủ ý, và có một phép kiểm khoá đúng điều đó
+(nếu ai đó chuyển các import lên đầu tệp, test sẽ đỏ ngay).
+
+### 3.6 Một lỗi tìm được TRƯỚC khi chạy Colab — và một test suýt bỏ lọt nó (01/10/2026)
+
+Rà lại Phase 3 trước khi đẩy lên Colab, đối chiếu `configs/mmdet/overfit20.py` với
+source mmdet 3.3.0 thì thấy: **`val_dataloader` của phép thử overfit trỏ nhầm thư
+mục ảnh.**
+
+**Cơ chế.** `overfit20.py` chỉ khai lại `ann_file`; mmengine gộp dict theo chiều
+sâu, nên mọi khoá không khai lại đều **thừa hưởng từ config cha**. Với
+`train_dataloader` thì thừa hưởng `data_prefix=images/train/` — tình cờ đúng, vì
+20 ảnh overfit lấy từ split train. Nhưng `val_dataloader` thừa hưởng
+`data_prefix=images/val/`, mà annotation thì trỏ vào chính 20 ảnh của train.
+
+**Vì sao không có gì báo lỗi.** Đọc `CocoDataset.parse_data_info` (mmdet 3.3.0):
+
+```python
+img_path = osp.join(self.data_prefix['img'], img_info['file_name'])
+```
+
+`file_name` do Phase 2 ghi ra là tên **phẳng có tiền tố split** (`train_10168.jpg`,
+xem §2.6), không kèm thư mục — nên thư mục ảnh do `data_prefix['img']` quyết định
+hoàn toàn. Và mmdet **không kiểm tra ảnh có tồn tại lúc dựng dataset**: đã đọc cả
+`coco.py` lẫn `base_det_dataset.py`, không có `check_file_exist`/`osp.exists` nào
+trên đường dẫn ảnh. Hệ quả: tiền kiểm vẫn in **ĐẠT HẾT**, train vẫn chạy hết
+epoch 1, và chỉ tới lượt validate đầu tiên mới nổ `FileNotFoundError` — tức là
+lỗi chỉ lộ ra sau khi đã trả tiền GPU, đúng loại lỗi mà cả notebook 03 sinh ra để
+chặn.
+
+**Đã sửa:** khai `data_prefix=dict(img='images/train/')` **tường minh** ở cả hai
+dataloader của `overfit20.py`, kèm chú thích tại chỗ.
+
+**Bài học đáng giá hơn cả lỗi: bản test đầu tiên suýt bỏ lọt nó.** Test mới đọc
+config bằng `ast` (không cần mmengine) để đòi mọi dataset trỏ tới annotation
+overfit phải tự khai `data_prefix`. Nhưng bản đầu của hàm đọc AST chỉ hiểu literal
+`{...}`, mà config mmengine viết `dict(...)` — nên nó trả `None` cho **mọi**
+dataloader, và vòng lặp `if ds is None: continue` biến tất cả thành "đạt". Test
+xanh trong khi không kiểm gì cả.
+
+Phát hiện được là nhờ **chạy test trên chính bản config còn lỗi trước khi sửa**
+(phép thử âm): nó phải đỏ ở đúng hai mục `data_prefix`, mà lại đỏ ở ba mục khác
+(config chính) và **im lặng** ở hai mục cần đỏ nhất. Sửa hai chỗ: hàm đọc AST hiểu
+thêm `dict(...)`, và tách hẳn "tệp không khai biến" (`None`) khỏi "có khai nhưng
+đọc không ra" (`_BieuThuc`) để không thể "đạt" bằng cách không đọc được gì.
+
+Nhân tiện đối chiếu luôn cú pháp `{{_base_.ann_overfit}}` với source mmengine
+0.10.7: hàm `_pre_substitute_base_vars` dùng đúng regex
+`r'\{\{\s*_base_\.([\w\.]+)\s*\}\}'`, và việc thay thế chỉ xảy ra khi **toàn bộ**
+chuỗi khớp — xác nhận chú thích trong `overfit20.py` là đúng, không phải suy đoán.
+
+**Chốt chặn thêm, để lỗi này không tái phát ở config khác.** Sửa đúng một chỗ
+`data_prefix` thì chỉ chặn được đúng ca đã gặp. Nên `scripts/train.py` có thêm
+**mục [2b]** trong phần tiền kiểm: mở từng annotation, ghép
+`data_prefix.img` + `data_root` với **từng** `file_name` rồi kiểm file có thật
+trên đĩa, in ra `2.343/2.343 ảnh có thật trong ...`. Đây chính là phép kiểm mà
+mmdet không làm, nên nó bắt được **mọi** config trỏ nhầm thư mục ảnh, không riêng
+gì overfit20. Chạy hết ba split tốn vài giây trên đĩa cục bộ.
+
+Kèm theo, `scripts/train.py` còn **từ chối** dataset không khai `data_prefix.img`
+thay vì bỏ qua im lặng: không khai thì không có cách nào biết ảnh nằm ở đâu, và
+đó cũng là thứ mmdet cần để dựng đường dẫn.
+
+### 3.7 Phần còn lại của Phase 3
+
+Chưa chạy gì trên Colab. Thứ tự trong `notebooks/03_train.ipynb`: giải nén dataset
+→ `kiem_tra_du_lieu` → `kiem_anchor` → `tao_overfit20` → `train.py --dry-run`
+(đo thời gian một epoch thật, chưa ghi checkpoint) → train overfit 20 ảnh →
+**dừng và báo cáo lại**. Train thật (Phase 4) chỉ bắt đầu sau khi chốt số epoch
+từ phép đo `--dry-run`.
+
+---
+
+## 4. Việc tiếp theo
 
 1. ~~Chạy `notebooks/00_colab_setup.ipynb` trên Colab (GPU T4) → chốt GATE 0.~~
    **Xong 30/09/2026** — xem §1.5 và §1.6.
@@ -790,10 +972,20 @@ sẵn). Từ Phase 3 chỉ cần giải nén tệp này vào `/content`, **khôn
    (1,86 GB). `audit.jsonl` và `build.jsonl` cũng đã sao lưu lên `MyDrive/Flood_House_AI/state/`
    nên phiên Colab sau không phải dựng lại gì.
 
-5. **Phase 3 — CẤU HÌNH MODEL & SANITY CHECK (chưa bắt đầu).** Đang chờ người dùng xác nhận
-   chốt GATE 2 rồi mới sang. Bốn việc đã biết trước:
-   - Giải nén `floodnet_coco.zip` vào `/content` — **không cần `floodnet_raw.zip` nữa**.
-   - **Kiểm dải anchor của RPN phủ tới ~350–500px**: nhà có cạnh trung vị 186px (§2.7), lớn
-     hơn nhiều so với mức anchor mặc định của COCO nhắm tới.
-   - Bật augmentation đổi tỉ lệ, vì dataset có hai cỡ ảnh lệch nhau 11% chiều dọc.
-   - Overfit 20 ảnh để chứng minh pipeline học được, trước khi train thật.
+5. **Phase 3 — CODE XONG, CHƯA CHẠY TRÊN COLAB (30/09/2026; rà soát lại 01/10/2026).** Config,
+   script, notebook và test đã viết xong; chi tiết và các điều tra từ source ở **§3**. Ba điểm
+   đáng chú ý:
+   - **Dải anchor không cần sửa.** Dự đoán ban đầu là "anchor mặc định của COCO nhắm tới box
+     nhỏ hơn nhiều, phải nới cho nhà to". Đọc kỹ config gốc thì **không phải vậy**: anchor
+     lớn nhất đã là 724×362px, thừa sức chứa cả nhà to nhất (p90 = 348×336px). Không đổi gì
+     — nhưng `scripts/kiem_anchor.py` vẫn đo lại trên box thật để báo cáo có số liệu (§3.3).
+   - **Bỏ ảnh không có nhà là mặc định của mmdet**, đồ án phải chủ động tắt
+     (`filter_empty_gt=False`), vì đầu ra cuối cùng là **đếm trên mọi ảnh** (§3.2e).
+   - **Rà soát trước khi chạy Colab tìm được một lỗi thật** — `val_dataloader` của
+     `overfit20.py` thừa hưởng nhầm `data_prefix=images/val/`. Đã sửa, khoá bằng test, và
+     thêm **mục [2b]** vào tiền kiểm để bắt được cả họ lỗi này ở config khác; chi tiết ở
+     **§3.6**. Số phép kiểm: **390** (§3.5).
+6. **Bước kế tiếp ngay: chạy `notebooks/03_train.ipynb` trên Colab T4 (Phase 3).** Thứ tự các
+   ô và thời gian dự kiến ghi trong README. Dừng ở phép thử overfit 20 ảnh và báo cáo lại
+   (số epoch, loss, thời gian một epoch đo được ở ô `--dry-run`) trước khi sang Phase 4.
+   Không đụng tới `floodnet_raw.zip` 13 GB nữa — chỉ cần `floodnet_coco.zip` 1,86 GB.

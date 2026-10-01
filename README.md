@@ -28,7 +28,7 @@ Số liệu và phát hiện đã kiểm chứng thật: [`docs/NOTES.md`](docs/
 | 0 | Khởi tạo repo + kiểm tra môi trường Colab | ✅ **GATE 0 đạt** — chạy thật trên Colab T4, đã kiểm chứng đủ (`docs/NOTES.md` §1.5–§1.6) |
 | 1 | Khám phá dữ liệu (EDA) & quyết định tiền xử lý | ✅ **GATE 1 đạt (30/09/2026)** — 4 tham số đã chốt (`docs/NOTES.md` §2.5) |
 | 2 | Chuyển mask → COCO & tiền xử lý offline | ✅ **GATE 2 đạt (30/09/2026)** — 2.343 ảnh, 6.301 box, đối chiếu Phase 1 khớp hoàn toàn (`docs/NOTES.md` §2.7) |
-| 3 | Cấu hình model & sanity check (overfit 20 ảnh) | ⏳ |
+| 3 | Cấu hình model & sanity check (overfit 20 ảnh) | 🟡 **Code xong (30/09/2026)** — chưa chạy trên Colab, xem `docs/NOTES.md` §3 |
 | 4 | Huấn luyện baseline (E1) | ⏳ |
 | 5 | Đánh giá mAP + sai số đếm & phân tích lỗi | ⏳ |
 | 6 | Thí nghiệm cải thiện & ablation (E2–E7) | ⏳ |
@@ -60,7 +60,9 @@ Dữ liệu và kết quả nằm trên Drive, **không** nằm trong repo:
 
 ```
 MyDrive/Flood_House_AI/
-├── floodnet_raw.zip     # dataset gốc (~12 GB, đã có sẵn)
+├── floodnet_raw.zip     # dataset gốc 13 GB — Phase 3 trở đi KHÔNG cần nữa
+├── processed/           # floodnet_coco.zip 1,86 GB do Phase 2 dựng ra
+├── state/               # audit.jsonl, build.jsonl (để không phải dựng lại từ đầu)
 ├── wheels/              # cache wheel mmcv, để phiên sau cài nhanh hơn
 └── runs/                # checkpoint, log, kết quả (notebook tự tạo)
 ```
@@ -132,6 +134,34 @@ Hai con số đo được ở Phase 2 mà Phase 3–6 phải dùng tới: box c�
 (ảnh chỉ rộng 1536px), và **46,9% số box bị cắt ở mép ảnh** — xem §2.7 để biết vì sao
 con số thứ hai là thật chứ không phải lỗi đếm.
 
+### Chạy Phase 3 (cấu hình model & sanity check)
+
+**Cần GPU T4** (chỉ ở ô `[3.9]` trở đi) và **cần cài môi trường trước** — chạy ô `[0.6]`
+của `notebooks/00_colab_setup.ipynb` trong cùng phiên, hoặc chạy cả notebook 00 từ trên
+xuống. Không cần `floodnet_raw.zip` 13 GB nữa, chỉ cần `floodnet_coco.zip` 1,86 GB.
+
+Mở `notebooks/03_train.ipynb` và chạy từ trên xuống:
+
+| Ô | Việc | Thời gian |
+|---|---|---|
+| `[3.5]` | Giải nén dataset vào `/content` + đối chiếu đúng 2.343 ảnh / 6.301 box | 1–2 phút |
+| `[3.6]` | Kiểm dữ liệu: tên lớp, **ảnh có thật trên đĩa**, số box mmdet thực nhận | ~1–2 phút |
+| `[3.7]` | Đo dải anchor của RPN trên box thật | vài giây |
+| `[3.8]` | Dựng `instances_overfit20.json` (20 ảnh, seed 42) | vài giây |
+| `[3.9]` | **`train.py --dry-run`** — chạy thử vài vòng, đo thời gian 1 epoch thật (GATE 3) | ~5 phút |
+| `[3.10]` | Train overfit 20 ảnh — **phép thử đường ống** (GATE 3) | 20–40 phút |
+| `[3.11]` | Train thật (Phase 4) | 6–8 giờ |
+
+**Dừng sau ô `[3.10]` và báo cáo lại.** Ô `[3.11]` là Phase 4, chỉ chạy sau khi chốt số
+epoch từ phép đo ở `[3.9]` — 24 epoch trong config hiện tại là **mặc định tạm**.
+
+Điều notebook này **không** làm: **không chạy test trên tập test**. Test chỉ được chạy
+**một lần duy nhất** ở Phase 5; chọn ngưỡng đếm và chọn checkpoint đều lấy từ val. Tập
+test ở đây chỉ được kiểm tra về mặt **cấu trúc** (đếm ảnh, đếm box), không dùng để chọn
+tham số. Kết quả overfit 20 ảnh cũng **không phải** kết quả của đồ án — nó chỉ chứng minh
+đường ống học được, xem đầu tệp `src/floodcount/data/overfit.py` để biết nó **không**
+chứng minh điều gì.
+
 ---
 
 ## Cấu trúc repo
@@ -142,13 +172,14 @@ con số thứ hai là thật chứ không phải lỗi đếm.
 | `docs/NOTES.md` | **Ghi chép thực tế**: phiên bản thư viện, cấu trúc dataset, các bẫy đã kiểm chứng |
 | `docs/RESULTS.md` | Bảng kết quả mọi thí nghiệm (sẽ tạo ở Phase 6) |
 | `configs/data.yaml` | **Mọi tham số** của Phase 1–2: đường dẫn, ngưỡng quyết định, tham số EDA |
-| `configs/mmdet/` | Config MMDetection của đồ án, kế thừa config gốc |
-| `src/floodcount/data/` | `audit.py` (EDA), `mask_to_coco.py`, `resize.py`, `visualize.py` |
+| `configs/mmdet/` | Config MMDetection của đồ án (`cascade_convnext_t_floodnet.py`), kế thừa config gốc; `overfit20.py` cho phép thử 20 ảnh |
+| `src/floodcount/data/` | `audit.py` (EDA), `mask_to_coco.py`, `resize.py`, `visualize.py`, `kiem_tra.py` (chốt chặn trước train), `overfit.py`, `photometric.py` |
+| `src/floodcount/models/` | `transforms.py` — transform tự viết đăng ký vào registry của mmdet |
 | `src/floodcount/eval/` | `coco_eval.py` (mAP), `count_eval.py` (MAE/RMSE đếm), `error_analysis.py` |
 | `src/floodcount/infer/` | `predict.py` (ảnh → box + số đếm), `tta_wbf.py` |
 | `scripts/` | Lệnh CLI mỏng gọi vào `src/` |
 | `notebooks/` | Notebook **mỏng** cho Colab — chỉ gọi script, không chứa logic |
-| `tests/` | Test chạy trên máy CPU, không cần GPU và không cần dataset thật — `test_audit.py`: 103 assertion, `test_mask_to_coco.py`: 106 assertion, đều chạy trên zip giả có cả bẫy ColorMasks |
+| `tests/` | **390 phép kiểm** trong 7 bộ test, chạy trên máy CPU — không cần GPU, không cần dataset thật (dùng zip giả có cả bẫy ColorMasks). `test_train.py` kiểm được cả trên máy **chưa cài MMDetection**, vì `scripts/train.py` chỉ import mmdet/mmengine bên trong hàm |
 | `outputs/` | Ảnh minh hoạ, overlay, biểu đồ (không đưa lên git) |
 | `requirements-colab.txt` | Bản ghi các gói cài thêm vào Colab (đọc phần đầu file trước khi dùng) |
 
@@ -216,6 +247,40 @@ Có hai hướng trái ngược: resize cả ảnh cho nhẹ, hoặc cắt tile 
 giữ nhà to. Hướng nào đúng phụ thuộc **phân bố kích thước nhà thật** — nên Phase 1
 đo bằng connected components rồi mới chốt, ngưỡng đã định trước trong plan
 (percentile 5 của cạnh box nhỏ nhất ≥ ~32px thì không cần tile).
+
+**Vì sao bỏ hẳn nhánh mask của model gốc?**
+Bản gốc là Cascade **Mask** R-CNN. Nhãn FloodNet vốn là mask, nhưng đồ án đã chuyển
+sang box từ Phase 2 và câu hỏi của đồ án là **đếm**, không phải tách hình dạng. Giữ
+mask head chỉ tốn thêm VRAM và thời gian. Điểm cần lưu ý khi bảo vệ: phải dùng
+`_delete_=True` ở `roi_head`, vì mmengine gộp dict theo chiều sâu — chỉ khai báo đè
+vài khoá thì `mask_roi_extractor`/`mask_head` của bản gốc **vẫn còn nguyên** và model
+lặng lẽ trở thành model có mask.
+
+**Vì sao giữ lại ảnh không có căn nhà nào, khi mmdet mặc định bỏ chúng?**
+Vì đầu ra cuối cùng của đồ án là **đếm trên mọi ảnh**, kể cả ảnh chỉ có nước và cây.
+Bỏ các ảnh rỗng thì model chỉ học "ảnh kiểu gì cũng có nhà" và sẽ đếm thừa trên ảnh
+không có nhà — đúng loại ảnh chiếm gần một nửa dataset. Vì vậy `filter_empty_gt=False`
+là lựa chọn có chủ ý, và Phase 6 sẽ có thí nghiệm bật/tắt để chứng minh bằng số liệu.
+
+**Vì sao tự viết transform tăng sáng thay vì dùng `PhotoMetricDistortion` có sẵn?**
+Bản có sẵn của mmdet kết thúc bằng `if swap_flag: img = img[..., swap_value]` — tức
+**đảo kênh màu ngẫu nhiên với xác suất 1/2**. Với bài toán này, màu nước là manh mối
+chính để phân biệt nhà ngập với nhà không ngập, nên đảo kênh là phá đúng tín hiệu cần
+học. Transform tự viết chỉ tăng/giảm sáng và tương phản, giữ nguyên màu.
+
+**Vì sao viết `scripts/train.py` riêng mà không gọi `tools/train.py` của mmdet?**
+Phần train thật chỉ là `Runner.from_cfg(cfg).train()` — một dòng. Thứ đáng viết là
+phần **tiền kiểm** chạy trước đó một phút: mmdet có ít nhất ba kiểu hỏng **không báo
+lỗi** (tên lớp không khớp JSON → bỏ im lặng cả một lớp; `keep_ratio` thiếu → ảnh méo;
+`num_classes` sót ở một trong ba tầng cascade). Một suất train 24 epoch là 6–8 giờ,
+phát hiện sai ở epoch 20 là mất trắng. Tiền kiểm in ra và **dừng** nếu có vấn đề.
+
+**Vì sao phải chạy thử overfit 20 ảnh trước khi train thật?**
+Để chứng minh đường ống chạy được đầu-cuối (dữ liệu đọc đúng, nhãn gắn đúng lớp, loss
+giảm được) với cái giá vài chục phút thay vì vài giờ. Nói rõ để bảo vệ: nó **không**
+chứng minh chất lượng phân loại ngập/không ngập — model chỉ cần nhận ra "đây là ảnh
+nào" là đủ đạt loss gần 0. Vì vậy kết quả overfit **không bao giờ** được trích làm kết
+quả của đồ án.
 
 ---
 
