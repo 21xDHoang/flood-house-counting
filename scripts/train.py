@@ -545,7 +545,11 @@ def chay_thu(cfg, so_vong, so_vong_khoi_dong=2):
                 torch.cuda.synchronize()
             ms = (time.perf_counter() - t) * 1000.0
 
-            loss = float(log_vars.get("loss", float("nan")))
+            # mmdet trả "loss" là tensor còn giữ đồ thị; float() thẳng lên nó chỉ
+            # gây UserWarning "Converting a tensor with requires_grad=True..."
+            # (vô hại nhưng làm rác log — đã gặp thật ở ô [3.9] ngày 01/10/2026).
+            loss = log_vars.get("loss", float("nan"))
+            loss = float(loss.detach()) if hasattr(loss, "detach") else float(loss)
             if i >= so_vong_khoi_dong:
                 ds_ms.append(ms)
                 ds_loss.append(loss)

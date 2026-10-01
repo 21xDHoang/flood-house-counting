@@ -1020,9 +1020,10 @@ thay vì bỏ qua im lặng: không khai thì không có cách nào biết ảnh
 GATE 3 đang chạy trên Colab (01/10/2026). Đã báo cáo về: `[3.6]`
 `kiem_tra_du_lieu` (ĐẠT HẾT), `[3.7]` `kiem_anchor` (ĐẠT — số đo ở §3.3),
 `[3.8]` dựng tập overfit (20 ảnh / 125 box, seed 42, script tự đọc lại từ đĩa
-xác nhận khớp). Còn lại: `[3.9]` `train.py --dry-run` — chạy lần đầu hỏng, xem
-§3.8 — rồi `[3.10]` train overfit 20 ảnh, **dừng và báo cáo lại**. Train thật
-(Phase 4) chỉ bắt đầu sau khi chốt số epoch từ phép đo `--dry-run`.
+xác nhận khớp). `[3.9]` `train.py --dry-run`: lần đầu hỏng (§3.8), lần hai xong
+— số đo ở §3.9. Còn lại: `[3.10]` train overfit 20 ảnh, **dừng và báo cáo lại**.
+Train thật (Phase 4) chỉ bắt đầu sau khi chốt số epoch từ phép đo `--dry-run`
+(ước lượng thô hiện có: 24 epoch ≈ 4,2 giờ phần train).
 
 ### 3.8 Lỗi thật đầu tiên trên Colab: `optim_wrapper` chưa được build (01/10/2026)
 
@@ -1056,6 +1057,37 @@ buộc `chay_thu` phải (a) gọi `build_optim_wrapper`, (b) gán kết quả l
 Bài học giống §3.6: **chép đúng một dòng của vòng lặp thật là chưa đủ** — phải
 chép cả những gì `Runner.train()` làm TRƯỚC vòng lặp. Bài học phụ: phép đo
 `--dry-run` đáng giá đúng như thiết kế — nó chết trước khi tốn một epoch GPU nào.
+
+### 3.9 Số đo `--dry-run` trên Colab T4 (01/10/2026)
+
+Chạy 20 vòng thật; vòng 0 (2.199,8 ms) bị bỏ khi tính trung bình vì còn khởi động
+worker và autotune cuDNN.
+
+| Đại lượng | Số đo |
+|---|---|
+| Thời gian/vòng (TB 18 vòng) | **866,3 ms** (thấp nhất 695,2 — cao nhất 1.038,0) |
+| Số vòng mỗi epoch | 723 (= 1.445 ảnh ÷ batch 2) |
+| **1 epoch (phần train)** | **10,4 phút** |
+| VRAM đỉnh (đã cấp phát) | 6,66 GB |
+| VRAM đỉnh (đã giành chỗ) | **7,81 GB / 14,56 GB (54%)** |
+| Loss 20 vòng đầu | không NaN; 3,82 → dao động 0,01–2,27 |
+
+- **VRAM còn dư nhiều** (54%): không phải giảm `batch_size` hay siết `scales_train`
+  vì lý do bộ nhớ.
+- **Dao động loss giữa các vòng là bình thường ở đây**: mỗi vòng là một batch
+  ngẫu nhiên khác nhau, và 812/1.445 ảnh train không có box (ô `[3.6]`) nên có
+  batch chỉ đóng góp loss của RPN. Khi train thật, nhìn trung bình trượt window 50.
+- Log `LearningRateDecayOptimizerConstructor` in đủ 8 nhóm tham số, thang LR
+  `8,24e-6 → 1e-4` — xác nhận bản sửa §3.8 đi đúng đường build của `train()`.
+- Script tự in ước lượng: 24 epoch ≈ **4,2 giờ** — chỉ phần train, chưa tính
+  validate mỗi epoch (450 ảnh) và thời gian ghi checkpoint lên Drive.
+
+**Hai cảnh báo cosmetic đã gặp (không ảnh hưởng số đo):**
+
+1. `train.py` — `float()` trên tensor còn `requires_grad` → `UserWarning` một lần
+   mỗi lần chạy. Đã sửa luôn trong lượt này: `.detach()` trước khi `float()`.
+2. Ô `[3.4]` in `pycocotools : ?` — thư viện không có `__version__`; đọc bằng
+   `importlib.metadata.version("pycocotools")` sẽ ra 2.0.11. Chưa sửa (dọn sau).
 
 ---
 
