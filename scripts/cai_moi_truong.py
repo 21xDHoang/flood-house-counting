@@ -298,6 +298,99 @@ def va_ca_ba(duong_mmdet=None, duong_mmengine=None, duong_mmpretrain=None):
     return (1 if loi else 0), dong
 
 
+def xoa_cache_mmpretrain(modules=None, reg_mmengine=None):
+    """Rút mmpretrain khỏi cache của kernel: module VÀ registry gốc của mmengine.
+
+    Chạy ở CUỐI ô cài đặt (notebook 00 ô [0.6], notebook 03 ô [3.3b]) và chạy
+    TRONG KERNEL, không phải trong tiến trình con: Python giữ module đã nạp
+    trong `sys.modules`, nên nếu kernel đã nạp mmpretrain TRƯỚC khi vá
+    `WITH_MULTIMODAL` thì giá trị cờ CŨ còn nằm trong RAM và việc vá coi như
+    không có tác dụng. Xoá để lần import sau nạp lại từ đĩa.
+
+    XOÁ MODULE LÀ CHƯA ĐỦ — lỗi thật gặp trên Colab 08/10/2026:
+
+        AssertionError: scope mmpretrain exists in runner registry
+
+    `mmpretrain/registry.py` tạo 21 registry con rồi gắn mỗi cái vào registry gốc
+    tương ứng của mmengine; dòng ĐẦU TIÊN của file đó là
+    `RUNNERS = Registry('runner', parent=MMENGINE_RUNNERS, ...)`. Xoá module khỏi
+    `sys.modules` rồi nạp lại là chạy lại đúng file đó, mà registry gốc vẫn còn
+    giữ con cũ — cùng tên scope — nên `Registry._add_child` assert trùng tên và
+    nổ ngay ở dòng đầu tiên (mmengine 0.10.7, `mmengine/registry/registry.py`).
+    Vì vậy phải rút tên 'mmpretrain' khỏi `children` của các registry gốc TRƯỚC
+    khi nạp lại.
+
+    Hai tham số chỉ để test được trên máy không cài mmengine: `modules` (dict
+    giống `sys.modules`) và `reg_mmengine` (module giả, có `Registry` và các
+    registry gốc). Để trống thì dùng đồ thật.
+
+    Trả về chuỗi nhiều dòng để ô notebook in thẳng.
+    """
+    if modules is None:
+        modules = sys.modules
+
+    xoa = [t for t in list(modules)
+           if t == "mmpretrain" or t.startswith("mmpretrain.")]
+    for t in xoa:
+        del modules[t]
+    dong = [f"đã xoá {len(xoa)} module mmpretrain khỏi cache"]
+
+    if reg_mmengine is None:
+        try:
+            import mmengine.registry as reg_mmengine
+        except Exception as e:                        # noqa: BLE001
+            dong.append(f"[!] Không nạp được mmengine.registry "
+                        f"({type(e).__name__}: {e})")
+            dong.append("    Nếu ô sau báo AssertionError 'scope mmpretrain "
+                        "exists', restart runtime rồi chạy lại từ ô cài đặt.")
+            return "\n".join(dong)
+
+        # Registry gốc nằm ở `mmengine/registry/root.py`, gói `__init__.py` nhập
+        # lại. Quét CẢ HAI: quét hụt thì miếng vá im lặng không làm gì, mà kiểu
+        # hỏng đó lại đúng là thứ đã gây ra lỗi này.
+        nguon = [reg_mmengine]
+        goc = getattr(reg_mmengine, "root", None)
+        if goc is not None and goc is not reg_mmengine:
+            nguon.append(goc)
+    else:
+        nguon = [reg_mmengine]
+
+    lop_registry = getattr(reg_mmengine, "Registry", None)
+    if lop_registry is None:
+        dong.append("[!] mmengine.registry không có lớp `Registry` — bỏ qua "
+                    "bước rút registry gốc.")
+        return "\n".join(dong)
+
+    so_rut, da_gap, loi = 0, set(), []
+    for mod in nguon:
+        for ten in dir(mod):
+            r = getattr(mod, ten, None)
+            if not isinstance(r, lop_registry) or id(r) in da_gap:
+                continue
+            da_gap.add(id(r))
+            try:
+                con = r.children
+                if "mmpretrain" in con:
+                    del con["mmpretrain"]
+                    so_rut += 1
+            except Exception as e:                    # noqa: BLE001
+                loi.append(f"{ten} ({type(e).__name__}: {e})")
+
+    dong.append(f"đã rút tên 'mmpretrain' khỏi {so_rut} registry gốc của mmengine")
+    if not da_gap:
+        # Không thấy registry gốc nào nghĩa là đã quét hụt (bản mmengine lạ, gói
+        # đổi cấu trúc) — nói thẳng ra thay vì để miếng vá im lặng không làm gì.
+        dong.append("[!] Không thấy registry gốc nào của mmengine để rút tên — "
+                    "miếng vá coi như KHÔNG chạy.")
+        dong.append("    Nếu ô sau báo AssertionError 'scope mmpretrain exists', "
+                    "restart runtime rồi chạy lại từ ô cài đặt.")
+    if loi:
+        dong.append("[!] Không đọc được `children` của: " + ", ".join(loi))
+        dong.append("    Nếu ô sau báo AssertionError 'scope mmpretrain exists', "
+                    "restart runtime rồi chạy lại từ ô cài đặt.")
+    return "\n".join(dong)
+
+
 # ---------------------------------------------------------------------------
 # Phần cài đặt — cần torch thật, chỉ chạy được trên Colab
 # ---------------------------------------------------------------------------

@@ -1759,6 +1759,79 @@ này đọc trực tiếp từ trong zip, không giải nén 900 MB checkpoint r
 
 ---
 
+### 3.17 Lỗi thật thứ tư trên Colab: `AssertionError: scope mmpretrain exists in runner registry` (08/10/2026)
+
+Ô `[3.4]` báo môi trường chưa sẵn sàng, chỉ một gói:
+
+```
+mmpretrain  : THIẾU/LỖI -> AssertionError: scope mmpretrain exists in runner registry
+```
+
+Trông như lỗi môi trường Colab, thực ra là **lỗi của chính ô cài đặt trong
+notebook đồ án** — và đây là lỗi thật thứ tư gặp trên Colab (sau §3.11–§3.15).
+
+**Chuyện gì xảy ra.** Cuối ô `[3.3b]` (và ô `[0.6]` của notebook 00) có một đoạn
+xoá cache: nếu kernel đã nạp mmpretrain TRƯỚC khi miếng vá `WITH_MULTIMODAL` được
+áp thì trong RAM còn module cũ mang cờ CŨ, nên phải `del sys.modules[...]` để lần
+import sau nạp lại từ đĩa. Đoạn đó xoá **module** — nhưng không đụng tới
+**registry**.
+
+Khi mmpretrain được nạp lần đầu, `mmpretrain/registry.py` tạo 21 registry con rồi
+gắn mỗi cái vào registry gốc tương ứng của mmengine, và dòng ĐẦU TIÊN của file đó
+là:
+
+```python
+RUNNERS = Registry('runner', parent=MMENGINE_RUNNERS, scope='mmpretrain')
+```
+
+Xoá module khỏi `sys.modules` rồi nạp lại nghĩa là **chạy lại đúng file đó**, mà
+`MMENGINE_RUNNERS.children` vẫn giữ con cũ dưới cùng tên scope — nên
+`Registry._add_child` (mmengine 0.10.7, `mmengine/registry/registry.py`) assert
+trùng tên và nổ ngay ở dòng đầu (RUNNERS là registry đầu tiên trong file, nên
+thông báo nhắc đúng "runner" chứ không phải registry nào khác).
+
+Lỗi chỉ hiện ra khi kernel **đã** nạp mmpretrain trước đó — chạy ô `[3.4]` một
+lần rồi chạy lại `[3.3b]`, hoặc chạy `[3.3b]` hai lần. Đúng kiểu "lần đầu chạy
+được, lần sau mới nổ", nên rất dễ bị đọc thành lỗi mạng/lỗi Colab.
+
+**Vì sao khó thấy:** cả hai ô đều in "đã xoá N module mmpretrain khỏi cache" rồi
+báo xong — miếng vá im lặng làm thiếu một nửa việc.
+
+**Đã vá:** hàm `xoa_cache_mmpretrain()` trong `scripts/cai_moi_truong.py` — xoá
+module VÀ rút tên `'mmpretrain'` khỏi `children` của mọi registry gốc của
+mmengine (quét cả gói `mmengine.registry` lẫn `mmengine.registry.root`, đếm theo
+`id()` vì cùng một registry xuất hiện ở cả hai nơi). Hai đầu mút đều phải nói
+thành lời: quét hụt (không thấy registry gốc nào) hoặc đọc `children` lỗi thì in
+`[!]` kèm cách xử lý — im lặng chính là thứ đã làm lỗi này khó tìm.
+
+**Test:** 10 phép kiểm mới trong `tests/test_cai_moi_truong.py` (mục 10 và 11).
+Phép kiểm đầu **tái hiện đúng cơ chế lỗi** bằng registry giả: dựng registry gốc
+đã có con `'mmpretrain'`, chỉ xoá module rồi tạo lại con đó → AssertionError y hệt
+thông báo trên Colab; sau khi chạy hàm vá thì nạp lại không nổ nữa. Phần còn lại
+khoá các đường hỏng im lặng, và khoá luôn hai notebook: gọi đúng hàm, không còn ô
+nào tự `del sys.modules[...]`, còn nguyên CRLF.
+
+**Nếu gặp lại trên một phiên Colab đang chạy** (kernel đã nhiễm, code mới chưa
+kịp `git pull`): dán vào một ô mới
+
+```python
+import sys
+import mmengine.registry as R
+for ten in dir(R):
+    r = getattr(R, ten)
+    if isinstance(r, R.Registry) and "mmpretrain" in r.children:
+        del r.children["mmpretrain"]
+for t in [t for t in list(sys.modules) if t.startswith("mmpretrain")]:
+    del sys.modules[t]
+import mmpretrain
+print("OK", mmpretrain.__version__)
+```
+
+rồi chạy lại ô `[3.4]`. Đường chắc chắn hơn: restart runtime rồi chạy lại từ ô
+`[3.3]` (môi trường nằm ở `/content` nên phải cài lại, trừ khi còn tệp đánh dấu).
+
+---
+
 ## 4. Việc tiếp theo
 
 1. ~~Chạy `notebooks/00_colab_setup.ipynb` trên Colab (GPU T4) → chốt GATE 0.~~

@@ -320,6 +320,150 @@ def main():
     kiem(cmt.INSTALL_MARKER == "/content/.floodcount_env_ready",
          "duong dan tep danh dau nhu cu (notebook 00 va 03 deu dua vao)")
 
+    # ======================================================================
+    # Lỗi thật trên Colab 08/10/2026: notebook xoá cache mmpretrain khỏi
+    # sys.modules rồi nạp lại, và nạp lại nổ
+    #     AssertionError: scope mmpretrain exists in runner registry
+    # vì `mmpretrain/registry.py` (dòng đầu tiên) gắn registry con của nó vào
+    # registry gốc của mmengine, mà registry gốc vẫn còn giữ con CŨ. Test này
+    # dựng lại đúng cơ chế đó bằng registry giả (máy CPU không có mmengine).
+    print("\n=== 10. Xoa cache mmpretrain: module VA registry goc (loi that 08/10/2026) ===")
+
+    class RegGia:
+        """Registry giả — bắt chước mmengine 0.10.7 ở ĐÚNG chỗ gây lỗi:
+        `_add_child` assert tên scope chưa có trong `children` của cha."""
+
+        def __init__(self, ten, scope=None, parent=None):
+            self.name = ten
+            self.scope = scope
+            self._children = {}
+            if parent is not None:
+                assert scope not in parent.children, \
+                    f"scope {scope} exists in {parent.name} registry"
+                parent.children[scope] = self
+
+        @property
+        def children(self):
+            return self._children
+
+    class RegHong(RegGia):
+        """Bản mmengine lạ: đọc `children` là nổ."""
+
+        @property
+        def children(self):
+            raise RuntimeError("bản mmengine lạ")
+
+    class ModGia:
+        """Module giả thay `mmengine.registry` (có cả `root` như gói thật)."""
+
+        Registry = RegGia
+
+    def dung_the_gioi():
+        """Trạng thái sau khi mmpretrain đã nạp MỘT lần: con của nó nằm trong
+        `children` của ba registry gốc, y như `mmpretrain/registry.py` để lại."""
+        models, runners, datasets = (RegGia("model"), RegGia("runner"),
+                                     RegGia("dataset"))
+        RegGia("runner", scope="mmpretrain", parent=runners)   # dòng ĐẦU của file
+        RegGia("model", scope="mmpretrain", parent=models)
+        RegGia("dataset", scope="mmpretrain", parent=datasets)
+        RegGia("model", scope="mmdet", parent=models)          # scope khác: phải giữ
+        reg = ModGia()
+        reg.MODELS, reg.RUNNERS, reg.DATASETS = models, runners, datasets
+        reg.root = ModGia()                     # mmengine/registry/root.py
+        reg.root.MODELS, reg.root.RUNNERS = models, runners   # CÙNG đối tượng
+        return reg, models, runners
+
+    # (a) Chứng minh lỗi có thật: làm Y NHƯ ô notebook trước 08/10/2026 — chỉ
+    #     xoá module khỏi sys.modules — thì lần nạp lại nổ, vì registry gốc vẫn
+    #     còn giữ con cũ.
+    _reg, _models, runners = dung_the_gioi()
+    sys_gia_a = {"mmpretrain": 1, "mmpretrain.registry": 2, "mmdet": 3}
+    for t in [t for t in list(sys_gia_a) if t.startswith("mmpretrain")]:
+        del sys_gia_a[t]
+    try:
+        RegGia("runner", scope="mmpretrain", parent=runners)      # nạp lại
+        tai_hien = False
+    except AssertionError as e:
+        tai_hien = "scope mmpretrain exists in runner registry" in str(e)
+    kiem(tai_hien, "tai hien dung loi that: nap lai khi chua rut registry -> "
+                   "AssertionError 'scope mmpretrain exists in runner registry'")
+
+    # (b) Hàm vá: xoá module + rút tên khỏi registry gốc -> nạp lại được.
+    reg, models, runners = dung_the_gioi()
+    sys_gia = {"mmpretrain": 1, "mmpretrain.registry": 2, "mmpretrain.models": 3,
+               "mmdet": 4, "torch": 5}
+    bao_cao = cmt.xoa_cache_mmpretrain(modules=sys_gia, reg_mmengine=reg)
+    kiem(sorted(sys_gia) == ["mmdet", "torch"],
+         f"chi xoa module mmpretrain, giu mmdet/torch (con: {sorted(sys_gia)})")
+    kiem("mmpretrain" not in runners.children,
+         "rut duoc 'mmpretrain' khoi children cua RUNNERS")
+    kiem("mmdet" in models.children,
+         "khong dung tới registry cua scope khac (mmdet con nguyen)")
+    kiem("đã xoá 3 module" in bao_cao and "3 registry gốc" in bao_cao,
+         f"bao cao dung so (dem 1 lan du MODELS/RUNNERS xuat hien 2 noi): {bao_cao!r}")
+
+    # (c) Chạy lại vô hại.
+    bao_cao2 = cmt.xoa_cache_mmpretrain(modules=sys_gia, reg_mmengine=reg)
+    kiem("đã xoá 0 module" in bao_cao2 and "0 registry gốc" in bao_cao2,
+         "chay lan hai: 0 module, 0 registry (vo hai)")
+
+    # (d) Đúng thứ tự đã gây lỗi: sau khi vá thì nạp lại KHÔNG nổ.
+    try:
+        RegGia("runner", scope="mmpretrain", parent=runners)
+        nap_lai_ok = True
+    except AssertionError:
+        nap_lai_ok = False
+    kiem(nap_lai_ok, "sau khi va, nap lai mmpretrain/registry.py khong con no")
+
+    # (e) Hỏng thì phải BÁO, không được im lặng — im lặng là thứ đã làm lỗi này
+    #     khó tìm. Hai kiểu hỏng: `children` ném lỗi, và thiếu lớp `Registry`.
+    reg_hong = ModGia()
+    reg_hong.MODELS = RegHong("model")
+    bao_cao3 = cmt.xoa_cache_mmpretrain(modules={"mmpretrain": 1},
+                                        reg_mmengine=reg_hong)
+    kiem("[!]" in bao_cao3 and "restart runtime" in bao_cao3,
+         "doc children loi -> bao [!] + chi cach xu ly (restart runtime)")
+
+    class ModThieuRegistry:
+        """Module giả không có lớp Registry."""
+
+    bao_cao4 = cmt.xoa_cache_mmpretrain(modules={"mmpretrain.registry": 1},
+                                        reg_mmengine=ModThieuRegistry())
+    kiem("[!]" in bao_cao4 and "Registry" in bao_cao4,
+         "thieu lop Registry -> bao [!], khong no")
+
+    # Quét hụt (không thấy registry gốc nào) cũng phải BÁO: đây đúng là kiểu
+    # hỏng im lặng đã làm lỗi 08/10/2026 khó tìm.
+    bao_cao5 = cmt.xoa_cache_mmpretrain(modules={"mmpretrain": 1},
+                                        reg_mmengine=ModGia())
+    kiem("[!]" in bao_cao5 and "KHÔNG chạy" in bao_cao5,
+         "quet hut (0 registry goc) -> bao [!] la mieng va khong chay")
+
+    # ======================================================================
+    print("\n=== 11. Hai notebook goi dung ham nay, khong tu xoa tay ===")
+    import json
+
+    for ten_nb in ("00_colab_setup.ipynb", "03_train.ipynb"):
+        b = (GOC_REPO / "notebooks" / ten_nb).read_bytes()
+        t = b.decode("utf-8")
+        kiem(t.count("\r\n") == t.count("\n"), f"{ten_nb}: con nguyen CRLF")
+        nguon = []
+        for o in json.loads(t)["cells"]:
+            s = o["source"]
+            nguon.append("".join(s) if isinstance(s, list) else s)
+
+        goi = [s for s in nguon if "xoa_cache_mmpretrain" in s]
+        kiem(len(goi) == 1, f"{ten_nb}: dung 1 o goi xoa_cache_mmpretrain")
+        kiem(not any("del sys.modules[" in s for s in nguon),
+             f"{ten_nb}: khong o nao tu xoa sys.modules nua (loi that 08/10/2026)")
+        if goi:
+            s = goi[0]
+            kiem("from cai_moi_truong import xoa_cache_mmpretrain" in s,
+                 f"{ten_nb}: nap ham tu scripts/cai_moi_truong.py")
+            kiem("sys.path.insert" in s, f"{ten_nb}: co them scripts/ vao sys.path")
+            kiem(s.index("cai_moi_truong.py") < s.index("xoa_cache_mmpretrain"),
+                 f"{ten_nb}: goi SAU khi cai xong (va truoc, xoa cache sau)")
+
     print()
     if loi:
         print(f"*** {len(loi)} MUC KHONG DAT ***")
