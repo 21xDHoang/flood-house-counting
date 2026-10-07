@@ -6,7 +6,7 @@ là ràng buộc thiết kế có chủ ý: nhờ nó mà phần logic thuần P
 được ngay trên máy Windows không cài MMDetection, thay vì phải chờ tới lúc chạy
 trên Colab mới biết sai.
 
-Bảy thứ test này phải khoá:
+Tám thứ test này phải khoá:
 
   1. `cac_ann_can_co` trả về ĐÚNG các tệp annotation mà config dùng. Sai chỗ này
      thì tiền kiểm đi kiểm nhầm tệp — tệ nhất là báo "ĐẠT HẾT" trong khi tệp
@@ -46,6 +46,15 @@ Bảy thứ test này phải khoá:
      khớp Resize với lúc đánh giá) và LR ×10 — cùng một `work_dir` khác hẳn thư
      mục của [3.10]. "Dọn dẹp" config này rồi chạy nhầm một lần khác là cách
      duy nhất để cả phép chẩn đoán mất giá trị mà không ai biết (§3.12).
+
+  8. Bản vá LR sau resume (§3.14) phải còn đủ ba mảnh, mỗi mảnh là một mắt của
+     chuỗi nhân quả đã gây ra lỗi: `_so_buoc_lich` tính CẢ bước `step()` mà hàm
+     dựng lịch của mmengine gọi sẵn lúc dựng; `dat_lai_lr_sau_resume` trả LR về
+     `initial_lr`, trả CẢ HAI bộ đếm của lịch về -1 rồi chạy lại lịch MỚI dựng
+     từ config hiện tại; và `main()` đăng ký nó TRƯỚC `runner.train()`. Đây là
+     lỗi IM LẶNG: lần chạy [3.10b] giai đoạn 2 resume "thành công" (thoát 0, mAP
+     0,747 → 0,779) nhưng train trọn 80 epoch ở LR 1e-6 thay vì 1e-4 — log in
+     đúng con số sai ấy ở cả 80 dòng, không có gì khác bất thường.
 
 Chạy:
     py tests/test_train.py
@@ -519,10 +528,14 @@ def main():
         # (nhan/box/loss/eval) hay o recipe (LR/tang cuong)? Cach tra loi: chay
         # LAI dung phep thu hoc vet nhung voi dieu kien de nhat. Giai doan 1 da
         # chay 07/10/2026: 0,742 va con leo — recipe la thu chan, nhung chua du
-        # moc; giai doan 2 gia han 40 -> 120 epoch, khong doi gi khac. Toan bo
-        # gia tri cua lan chay nam o hai dong ghi de — tat tang cuong va LR x10 —
-        # nen chung phai duoc khoa lai: "don dep" config roi chay nham mot lan
-        # khac thi phep chan doan mat gia tri ma khong co gi bao.
+        # moc. Giai doan 2 (gia han 40 -> 120 epoch bang resume) cung da chay,
+        # nhung ket qua VO HIEU: resume dinh loi LR §3.14 nen ca 80 epoch chay o
+        # 1e-6. Vi vay lan chay dung la mot lan chay MOI tron 120 epoch trong thu
+        # muc thu hai (work_dir duoi day, duoi `2`) — dung bang lich ma giai doan
+        # 1 + 2 da dinh ghep lai. Toan bo gia tri cua lan chay nam o hai dong ghi
+        # de — tat tang cuong va LR x10 — nen chung phai duoc khoa lai: "don dep"
+        # config roi chay nham mot lan khac thi phep chan doan mat gia tri ma
+        # khong co gi bao.
         duong_hv = os.path.join(str(GOC_REPO), "configs", "mmdet",
                                 "overfit20_hocvet.py")
         kiem(os.path.exists(duong_hv),
@@ -585,9 +598,9 @@ def main():
         so_epoch_hv = _doc_bien(duong_hv, "max_epochs")
         kiem(moc_hv == [30] and so_epoch_hv == 120,
              f"lich: MOT moc giam LR [30] tren 120 epoch (moc cuoi phai nam "
-             f"trong pham vi; giai doan 1 chay 40 epoch, giai doan 2 resume chay "
-             f"tiep toi 120 — xem NOTES §3.12), thuc te moc {moc_hv!r} tren "
-             f"{so_epoch_hv!r} epoch")
+             f"trong pham vi; giai doan 1 chay 40 epoch, lan chay lai chay tron "
+             f"120 — hai ve phai ghep thanh dung lich da dinh, xem NOTES §3.12 "
+             f"va §3.14), thuc te moc {moc_hv!r} tren {so_epoch_hv!r} epoch")
 
         # classwise=True: log lan nay in AP theo TUNG LOP — de phan biet "mot lop
         # hong" voi "hoc chung chung khong len".
@@ -595,14 +608,21 @@ def main():
         kiem(isinstance(ev_hv, dict) and ev_hv.get("classwise") is True,
              f"val_evaluator bat classwise de in AP tung lop, thuc te {ev_hv!r}")
 
-        # work_dir phai KHAC cua [3.10]. Lan thi chu: chay vao dung thu muc cu
-        # thi `resume=True` (mac dinh) chay tiep tu checkpoint cu — xong 40
-        # epoch ma khong ai biet ket qua la cua lich moi hay lich cu.
+        # work_dir phai KHAC cua [3.10] — va tu 07/10/2026 la thu muc co duoi
+        # `2`, khac ca cai duoi `1` da chay het 120 epoch o LR 1e-6 (§3.14).
+        # Lan thi chu: chay vao dung thu muc cu thi `resume=True` (mac dinh)
+        # chay tiep tu checkpoint cu — xong 40 epoch ma khong ai biet ket qua
+        # la cua lich moi hay lich cu; con vao thu muc da chay HET thi no nap
+        # checkpoint roi thoat, khong chay them epoch nao.
         wd_hv = _doc_bien(duong_hv, "work_dir")
         wd_of = _doc_bien(duong_overfit, "work_dir")
         kiem(isinstance(wd_hv, str) and isinstance(wd_of, str)
              and wd_hv != wd_of,
              f"work_dir rieng, khac cua [3.10] ({wd_of!r}), thuc te {wd_hv!r}")
+        kiem(isinstance(wd_hv, str) and wd_hv.endswith("overfit20_hocvet2"),
+             f"work_dir dung thu muc duoi `2` — thu muc duoi `1` da chay HET 120 "
+             f"epoch o LR 1e-6 (§3.14) nen resume vao do la no-op im lang, "
+             f"thuc te {wd_hv!r}")
 
         print("\n=== 6. data_prefix: anh cua tap overfit nam o images/train ===")
         # Loi that, tim ra bang cach doc source mmdet 3.3.0:
@@ -733,6 +753,189 @@ def main():
         kiem(train.thu_muc_anh({}, goc) is None,
              "dataset khong khai data_prefix -> None (de phan goi bao loi, "
              "khong im lang bo qua)")
+
+        print("\n=== 9. Va LR sau resume: loi IM LANG thu tu tren Colab ===")
+        # Loi that 07/10/2026 (o [3.10b] giai doan 2, docs/NOTES.md §3.14): lan
+        # resume DAU TIEN chay duoc da train tron 80 epoch voi `base_lr:
+        # 1.0000e-06` trong khi lich da dinh 1e-4 — SAI 100 LAN, va log in dung
+        # con so sai ay o CA 80 dong ma khong co gi khac bat thuong (thoat 0, mAP
+        # van 0,747 -> 0,779 nen nhin be ngoai y het "chay tot"). Chuoi nhan qua:
+        # `save_optimizer=False` -> resume bo qua optimizer -> nhom tham so giu
+        # nguyen LR vua dung tu config -> buoc `step()` trong ham dung LinearLR
+        # nhan `start_factor` (0,001) vao MOI nhom -> resume nap lai trang thai
+        # lich CU (ca `end` cu) nen khong buoc nao hoan lai duoc he so do.
+        # Test nay khoa ban va; bo bat ky manh nao la FAIL (kiem am da chay).
+        ham_buoc = next((n for n in ast.walk(cay)
+                         if isinstance(n, ast.FunctionDef)
+                         and n.name == "_so_buoc_lich"), None)
+        kiem(ham_buoc is not None,
+             "9a. tim thay _so_buoc_lich (so buoc lich da di qua)")
+        if ham_buoc is not None:
+            tra_ve = [n.value for n in ast.walk(ham_buoc)
+                      if isinstance(n, ast.Return) and n.value is not None]
+            kiem(any(isinstance(v, ast.BinOp) and isinstance(v.op, ast.Add)
+                     and isinstance(v.right, ast.Constant)
+                     and v.right.value == 1
+                     and isinstance(v.left, ast.IfExp) for v in tra_ve),
+                 "...tra ve (epoch | so_vong) + 1 — tinh CA buoc step() ma ham "
+                 "dung lich goi san: thieu '+ 1' la ca lich lech mot buoc, va "
+                 "gan mot moc giam LR thi lech han mot muc LR")
+
+        def _so_am_mot(v):
+            """-1 viet trong AST la UnaryOp(USub, Constant(1))."""
+            return (isinstance(v, ast.UnaryOp) and isinstance(v.op, ast.USub)
+                    and isinstance(v.operand, ast.Constant)
+                    and v.operand.value == 1)
+
+        ham_lr = next((n for n in ast.walk(cay)
+                       if isinstance(n, ast.FunctionDef)
+                       and n.name == "dat_lai_lr_sau_resume"), None)
+        kiem(ham_lr is not None, "9b. tim thay dat_lai_lr_sau_resume")
+        if ham_lr is not None:
+            # Import nam TRONG ham: de len dau tep la muc 1 do ngay.
+            kiem(any(isinstance(n, ast.ImportFrom)
+                     and n.module == "mmengine.optim"
+                     and any(a.name == "BaseOptimWrapper" for a in n.names)
+                     for n in ast.walk(ham_lr)),
+                 "...import BaseOptimWrapper nam TRONG ham (giu may sach chay "
+                 "duoc bo test nay)")
+
+            # Cac loi BAO ROI (tra False + in ly do), khong doan bua: wrapper
+            # kieu khac, khong co lich LR, chay moi, thieu initial_lr.
+            kiem(any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                     and n.func.id == "isinstance"
+                     and any(isinstance(a, ast.Name)
+                             and a.id == "BaseOptimWrapper" for a in n.args)
+                     for n in ast.walk(ham_lr)),
+                 "...co chan `isinstance(..., BaseOptimWrapper)` (OptimWrapperDict "
+                 "chua ho tro -> BO QUA chu khong sua bua)")
+            kiem(all(any(isinstance(n, ast.Compare)
+                         and any(isinstance(a, ast.Attribute) and a.attr == ten
+                                 for a in ast.walk(n))
+                         for n in ast.walk(ham_lr))
+                     for ten in ("iter", "epoch")),
+                 "...co nhanh 'chay MOI thi khong dung gi' (runner.iter va "
+                 "runner.epoch deu <= 0)")
+            # `"initial_lr" not in g` — chuoi nam ben TRAI phep so sanh.
+            kiem(any(isinstance(n, ast.Compare)
+                     and any(isinstance(c, ast.Constant)
+                             and c.value == "initial_lr"
+                             for c in [n.left, *n.comparators])
+                     for n in ast.walk(ham_lr)),
+                 "...co kiem 'initial_lr' co trong moi nhom (thieu la BO QUA: "
+                 "khong co gia tri goc thi khong dung lai duoc)")
+            kiem(any(isinstance(n, ast.Call)
+                     and isinstance(n.func, ast.Attribute)
+                     and n.func.attr == "build_param_scheduler"
+                     for n in ast.walk(ham_lr)),
+                 "...dung lai lich bang runner.build_param_scheduler tu config "
+                 "HIEN TAI (lich trong checkpoint da dong bang `end`/`milestones` "
+                 "cua lan chay cu)")
+            kiem(any(isinstance(n, ast.Assign)
+                     and isinstance(n.targets[0], ast.Subscript)
+                     and isinstance(n.targets[0].slice, ast.Constant)
+                     and n.targets[0].slice.value == "lr"
+                     and isinstance(n.value, ast.Subscript)
+                     and isinstance(n.value.slice, ast.Constant)
+                     and n.value.slice.value == "initial_lr"
+                     for n in ast.walk(ham_lr)),
+                 "...tra LR cua MOI nhom ve `initial_lr` truoc khi chay lai")
+
+            # Manh de sai nhat — da sai that mot lan khi kiem chung: ham dung
+            # lich cua mmengine KET THUC bang mot buoc `step()` (buoc 0), buoc ay
+            # chay ngay luc dung `moi` (truoc khi ta tra LR ve `initial_lr`) va
+            # tieu mat `last_step=0`. Quen tra bo dem thi chuoi replay thieu buoc
+            # 0 va bu lai o cuoi: LinearLR lech dung 1/start_factor = 1000 lan
+            # (do duoc: 1e-1 thay vi 1e-4).
+            vong_s = next((n for n in ast.walk(ham_lr)
+                           if isinstance(n, ast.For)
+                           and isinstance(n.target, ast.Name)
+                           and n.target.id == "s"
+                           and isinstance(n.iter, ast.Name)
+                           and n.iter.id == "moi"), None)
+            kiem(vong_s is not None,
+                 "9b.5 co vong `for s in moi` (chay lai lich MOI tu config)")
+            if vong_s is not None:
+                tra_dem = {n.targets[0].attr for n in ast.walk(vong_s)
+                           if isinstance(n, ast.Assign)
+                           and isinstance(n.targets[0], ast.Attribute)
+                           and _so_am_mot(n.value)}
+                kiem({"last_step", "_global_step"} <= tra_dem,
+                     f"...tra CA HAI bo dem last_step/_global_step ve -1 TRUOC "
+                     f"khi chay lai — ham dung lich goi san mot buoc step() luc "
+                     f"dung, quen tra lai thi chuoi replay thieu buoc 0 va lech "
+                     f"dung 1/start_factor = 1000 lan, thuc te {sorted(tra_dem)}")
+                chay_lai = any(
+                    isinstance(n, ast.Call)
+                    and isinstance(n.func, ast.Attribute)
+                    and n.func.attr == "step"
+                    and isinstance(n.func.value, ast.Name)
+                    and n.func.value.id == "s"
+                    and any(isinstance(f, ast.For)
+                            and isinstance(f.iter, ast.Call)
+                            and isinstance(f.iter.func, ast.Name)
+                            and f.iter.func.id == "range"
+                            and f.iter.args
+                            and isinstance(f.iter.args[0], ast.Call)
+                            and isinstance(f.iter.args[0].func, ast.Name)
+                            and f.iter.args[0].func.id == "_so_buoc_lich"
+                            for f in ast.walk(vong_s))
+                    for n in ast.walk(vong_s))
+                kiem(chay_lai,
+                     "...chay lai dung so buoc `_so_buoc_lich(...)` bang s.step()")
+            kiem(any(isinstance(n, ast.Assign)
+                     and isinstance(n.targets[0], ast.Attribute)
+                     and n.targets[0].attr == "param_schedulers"
+                     and isinstance(n.value, ast.Name) and n.value.id == "moi"
+                     for n in ast.walk(ham_lr)),
+                 "...gan `runner.param_schedulers = moi` (tu day lich moi la "
+                 "lich dang chay, ke ca khi checkpoint tiep theo duoc ghi)")
+
+        print("\n=== 9c. Hook `before_train` — chay dung mot lan, dung luc ===")
+        ham_dk = next((n for n in ast.walk(cay)
+                       if isinstance(n, ast.FunctionDef)
+                       and n.name == "dang_ky_va_lr_sau_resume"), None)
+        kiem(ham_dk is not None, "tim thay dang_ky_va_lr_sau_resume")
+        if ham_dk is not None:
+            kiem(any(isinstance(n, ast.ImportFrom)
+                     and n.module == "mmengine.hooks"
+                     and any(a.name == "Hook" for a in n.names)
+                     for n in ast.walk(ham_dk)),
+                 "import Hook nam TRONG ham (giu may sach chay duoc)")
+            lop_hook = next((n for n in ast.walk(ham_dk)
+                             if isinstance(n, ast.ClassDef)), None)
+            kiem(lop_hook is not None and any(
+                     isinstance(n, ast.FunctionDef)
+                     and n.name == "before_train" for n in lop_hook.body),
+                 "lop hook co before_train — moc SOM NHAT ma wrapper da dung, "
+                 "lich da dung VA resume da nap xong (Runner.train: 1733/1737 "
+                 "dung, 1765 resume, hook chay trong train_loop.run)")
+            kiem(any(isinstance(n, ast.Call)
+                     and isinstance(n.func, ast.Attribute)
+                     and n.func.attr == "register_hook"
+                     and any(k.arg == "priority"
+                             and isinstance(k.value, ast.Constant)
+                             and k.value.value == "VERY_HIGH"
+                             for k in n.keywords)
+                     for n in ast.walk(ham_dk)),
+                 "dang ky voi priority VERY_HIGH — chay TRUOC LoggerHook nen "
+                 "dong log epoch dau tien da in LR dung")
+
+        than_main = next((n for n in ast.walk(cay)
+                          if isinstance(n, ast.FunctionDef)
+                          and n.name == "main"), None)
+        if than_main is not None:
+            dong_dk = [n.lineno for n in ast.walk(than_main)
+                       if isinstance(n, ast.Call)
+                       and isinstance(n.func, ast.Name)
+                       and n.func.id == "dang_ky_va_lr_sau_resume"]
+            dong_train = [n.lineno for n in ast.walk(than_main)
+                          if isinstance(n, ast.Call)
+                          and isinstance(n.func, ast.Attribute)
+                          and n.func.attr == "train"]
+            kiem(bool(dong_dk) and bool(dong_train)
+                 and min(dong_dk) < min(dong_train),
+                 "9d. main() dang ky ban va TRUOC runner.train()")
 
     finally:
         import shutil

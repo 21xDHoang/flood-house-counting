@@ -51,22 +51,37 @@
 #     của [3.10]) — lần này HẾT EPOCH, không phải BÃO HOÀ. Vì vậy chưa được
 #     phép kết luận "trần thật", mà cũng chưa đủ mốc để kết luận ĐẠT.
 #
-# GIAI ĐOẠN 2 chỉ đổi MỘT thứ: gia hạn 40 -> 120 epoch (max_epochs dưới đây).
-# Chạy lại đúng ô [3.10b]: `resume=True` tự nạp checkpoint epoch 40 và chạy
-# tiếp 41..120, giữ nguyên base_lr 1e-4 (mốc [30] đã qua — dù lịch được nạp
-# từ checkpoint hay dựng lại từ config thì cũng vậy). Xác nhận trong log 2-3
-# epoch đầu: `base_lr: 1.0000e-04` và mAP ~0,7x, KHÔNG phải ~0 (thấy ~0 là
-# resume hỏng, dừng báo ngay).
+# GIAI ĐOẠN 2 (07/10/2026) ĐÃ CHẠY — nhưng KẾT QUẢ VÔ HIỆU vì lỗi LR im lặng
+# ---------------------------------------------------------------------------
+# Lần đó `resume=True` nạp checkpoint epoch 40 rồi chạy trọn 41..120, thoát 0,
+# mAP 0,747 -> 0,779 (mAP50 0,919; flooded 0,838 / non_flooded 0,720). NHƯNG cả
+# 80 epoch chạy ở `base_lr: 1.0000e-06` — 1/100 LR mà lịch đã định — do lỗi
+# LR sau resume ở docs/NOTES.md §3.14 (`save_optimizer=False` + bước `step()`
+# lúc dựng `LinearLR` + trạng thái lịch cũ được nạp lại). Số của lần chạy đó
+# KHÔNG được dùng để chốt gì: "bão hoà ở LR sai" không nói gì về trần thật.
 #
-# Chốt đọc giai đoạn 2 (giữ nguyên tinh thần chốt trước, không dịch mốc):
+# CHẠY LẠI — giai đoạn 2 lần hai: chạy MỚI trọn 120 epoch, KHÔNG resume.
+#   - Không resume được nữa: `epoch_40.pth` đã bị `max_keep_ckpts=2` xoá từ lâu,
+#     còn thư mục cũ đã ở epoch 120 nên resume vào đó là no-op.
+#   - Lịch của lần chạy mới ĐÚNG BẰNG lịch mà "giai đoạn 1 + giai đoạn 2" đã
+#     định ghép lại: 30 epoch đầu ở 1e-3, rồi 1e-4 cố định tới hết epoch 120.
+#   - Bản vá §3.14 chỉ can thiệp khi resume, nên lần chạy mới này đi đúng đường
+#     cũ — không có gì mới để tin, chỉ có lịch LR đúng.
+# Xác nhận trong log (dừng báo ngay nếu lệch):
+#   - epoch 1-12: LR leo dần từ 1e-6 lên ~9,8e-4 (warmup 50 vòng, hết giữa
+#     epoch 13);
+#   - cuối epoch 13: `base_lr: 1.0000e-03`;
+#   - epoch 14-30: giữ 1.0000e-03;
+#   - TỪ EPOCH 31: `base_lr: 1.0000e-04`, giữ nguyên tới epoch 120.
+#
+# Chốt đọc giai đoạn 2 (giữ nguyên, không dịch mốc):
 #   - mAP > 0,95  -> GATE 3 ĐẠT, bàn tiếp LR + số epoch cho train thật.
 #   - bão hoà < 0,9 (10 epoch liền nhích < 0,01) -> trần thật; đào tiếp bằng
 #     AP từng lớp (non_flooded đang thua flooded 0,14) + ảnh vis_data.
 #   - 0,9-0,95, hoặc hết 120 epoch mà còn leo -> gửi số liệu, quyết định cùng.
 # Thấy > 0,95 là DỪNG ĐƯỢC: checkpoint epoch vừa xong đã ghi ra Drive rồi.
 #
-# Thời lượng: giai đoạn 1 (40 epoch) mất ~6-7 phút trên A100; giai đoạn 2
-# (thêm 80 epoch) ~13 phút trên A100, ~50-60 phút trên T4.
+# Thời lượng: 120 epoch liền mạch ~20 phút trên A100, ~50-60 phút trên T4.
 #
 # ⚠️ Vẫn là điểm trên tập TRAIN. Tuyệt đối không trích dẫn mAP của tệp này vào
 # báo cáo như một kết quả của đồ án (xem đầu tệp overfit20.py).
@@ -109,9 +124,10 @@ train_dataloader = dict(
 # 2. Lịch train: LR chỉ giảm MỘT lần ở epoch 30 (40 -> 120 epoch ở giai đoạn 2)
 # ---------------------------------------------------------------------------
 # Giai đoạn 1 (đã chạy, 40 epoch): 300 vòng đầu ở 1e-3, 100 vòng cuối ở 1e-4.
-# Giai đoạn 2 (chạy tiếp bằng resume): 800 vòng ở 1e-4. Warmup 50 vòng của
-# overfit20.py (5 epoch đầu) giữ nguyên — LR 1e-3 ngay từ vòng đầu dễ làm hỏng
-# backbone vừa nạp trọng số ImageNet.
+# Lần chạy mới (120 epoch liền): 30 epoch đầu ở 1e-3, 90 epoch cuối ở 1e-4 —
+# đúng bằng giai đoạn 1 nối thẳng vào phần mà giai đoạn 2 đã định chạy. Warmup
+# 50 vòng của overfit20.py (5 epoch đầu) giữ nguyên — LR 1e-3 ngay từ vòng đầu
+# dễ làm hỏng backbone vừa nạp trọng số ImageNet.
 max_epochs = 120
 train_cfg = dict(max_epochs=max_epochs)
 
@@ -148,4 +164,9 @@ val_evaluator = dict(classwise=True)
 # ---------------------------------------------------------------------------
 # Lẫn work_dir thì `resume=True` sẽ tự chạy tiếp từ checkpoint CŨ và cả phép
 # chẩn đoán thành vô nghĩa (nó sẽ chạy tiếp lịch cũ, không phải lịch 40 epoch).
-work_dir = '/content/drive/MyDrive/Flood_House_AI/runs/sanity/overfit20_hocvet'
+#
+# Tên có đuôi `2` từ 07/10/2026: thư mục `overfit20_hocvet` đã chạy hết 120
+# epoch ở lần resume dính lỗi LR (§3.14) — toàn bộ checkpoint trong đó đều được
+# train ở 1e-6 nên không dùng lại được, mà `resume=True` vào đó thì chỉ nạp
+# checkpoint epoch 120 rồi thoát (không chạy thêm epoch nào, không in lỗi).
+work_dir = '/content/drive/MyDrive/Flood_House_AI/runs/sanity/overfit20_hocvet2'

@@ -685,6 +685,160 @@ def va_torch_load_resume():
     return True
 
 
+def _so_buoc_lich(sched, epoch, so_vong):
+    """Số lần `sched.step()` mà lần chạy thật ĐÃ gọi, tính cả bước lúc dựng.
+
+    Đã đọc source mmengine 0.10.7: `_ParamScheduler.__init__` kết thúc bằng
+    `self.step()` — lịch đi trước đúng MỘT bước ngay khi được dựng (chính bước
+    này nhân `start_factor` vào các nhóm khi resume). Tua lại mà quên nó thì
+    kết quả lệch đúng một bước, và với `MultiStepLR` lệch một bước có thể là
+    lệch cả một mốc giảm LR. Đây là số bước PHẢI chạy lại SAU KHI đã trả
+    `last_step`/`_global_step` của lịch về `-1` — xem `dat_lai_lr_sau_resume`.
+    """
+    return (epoch if sched.by_epoch else so_vong) + 1
+
+
+def dat_lai_lr_sau_resume(runner) -> bool:
+    """[vá] Sau khi resume: đặt lại LR về ĐÚNG giá trị mà lịch đã định.
+
+    LỖI THẬT (ô [3.10b] giai đoạn 2, 07/10/2026 — docs/NOTES.md §3.14)
+    ------------------------------------------------------------------
+    Lần chạy đó resume từ checkpoint epoch 40 và huấn luyện tiếp 80 epoch với
+    `base_lr: 1.0000e-06` trong khi lịch đã định 1e-4 — SAI 100 LẦN, và log in
+    đúng con số sai ấy ở cả 800 dòng mà không có gì khác bất thường. Chuỗi nhân
+    quả (đã dựng lại từng bước ngoài Colab, khớp từng chữ số với log):
+
+      1. `save_optimizer=False` (config chính) -> checkpoint KHÔNG có trạng thái
+         optimizer. `Runner.resume()` vì thế bỏ qua bước nạp optimizer (đã đọc
+         source: `if 'optimizer' in checkpoint and resume_optimizer`) và các
+         nhóm tham số giữ nguyên LR vừa dựng từ config (1e-3 / 1e-4).
+      2. `LinearLR(start_factor=0.001)` — bước `step()` trong hàm dựng của nó
+         nhân ngay `start_factor` vào MỌI nhóm: 1e-3 -> 1e-6 (và 1e-4 -> 1e-7
+         ở config thật).
+      3. `resume()` sau đó nạp `param_schedulers` từ checkpoint
+         (`load_state_dict` = `self.__dict__.update`). Trạng thái nạp về làm cả
+         hai lịch ĐỨNG YÊN VĨNH VIỄN: `LinearLR` đã qua `end` (warmup xong từ
+         epoch 5), còn `MultiStepLR` được nạp cả `end=40` của config CŨ nên
+         không còn bước nào rơi vào khoảng `[begin, end)` để mà chạy.
+      4. Hệ quả: không bước nào hoàn lại được hệ số 0,001 ở (2). LR đứng nguyên
+         ở 1e-6 suốt 80 epoch; và nếu lịch còn mốc giảm LR phía trước thì nó
+         còn tụt tiếp ×0,1 trên nền đã hỏng — config thật (milestones [16, 22],
+         `save_optimizer=False`) sẽ resume ở 1e-7 rồi 1e-8, tức là train thật
+         coi như đứng im mà không có gì báo.
+
+    CÁCH VÁ: dựng lại lịch từ config HIỆN TẠI rồi chạy lại nó
+    ---------------------------------------------------------
+    Lịch của mmengine là hàm THUẦN của hai bộ đếm (`_global_step`, `last_step`)
+    nhân lên giá trị hiện có của nhóm (đã đọc `_get_value` của cả hai lớp:
+    `LinearParamScheduler` và `MultiStepParamScheduler`; `MultiStepLR` KHÔNG sửa
+    `self.milestones`), nên dựng lại trạng thái đúng không cần mô phỏng gì mới:
+    trả các nhóm về `initial_lr` rồi chạy lại lịch đúng số bước đã đi qua. Cách
+    này tự khớp với mmengine vì dùng CHÍNH mã của nó, không chép lại công thức.
+
+    Lịch đem chạy lại phải dựng MỚI từ config hiện tại, không dùng lại lịch
+    trong checkpoint: `load_state_dict` của resume là `self.__dict__.update`,
+    nạp về cả `end` lẫn `milestones` của lần chạy CŨ — gia hạn số epoch giữa hai
+    lần chạy thì lịch cũ đóng băng ở `end` cũ và không mốc nào nổ nữa (đúng ca
+    [3.10b]: config mới ghi `end=120` nhưng lịch trong checkpoint vẫn là 40).
+
+    Dựng mới thôi thì CHƯA đủ, và đây là chỗ dễ sai nhất — đã sai thật một lần
+    khi kiểm chứng: hàm dựng của mmengine kết thúc bằng một bước `step()` (bước
+    0), bước ấy chạy NGAY lúc `build_param_scheduler` dựng `moi` — tức là TRƯỚC
+    khi ta trả LR về `initial_lr` — và nó tiêu mất `last_step=0`. Nếu chỉ trả LR
+    rồi chạy lại `runner.epoch + 1` bước thì chuỗi replay THIẾU bước 0 và chạy
+    thừa một bước ở cuối; hai đầu mút của `LinearLR` chênh nhau đúng
+    `1/start_factor` (=1000 lần với `start_factor=0.001`, đo được trên harness:
+    LR ra 1e-1 thay vì 1e-4). Vì thế phải trả CẢ BỘ ĐẾM của lịch về `-1` (đúng
+    trạng thái ngay trước bước 0) rồi mới chạy lại đủ số bước — `_so_buoc_lich`
+    đã tính cả bước 0.
+
+    Không phải resume thì không đụng gì (chạy mới: `iter` và `epoch` đều 0), và
+    vẫn KHÔNG cần lưu optimizer vào checkpoint: khác biệt còn lại sau bản vá chỉ
+    là các moment của AdamW được khởi động lại — đúng thứ mà chú thích
+    `save_optimizer=False` trong config chính đã cân nhắc và chấp nhận.
+
+    Trả về True nếu đã đặt lại LR.
+    """
+    from mmengine.optim import BaseOptimWrapper
+
+    if not isinstance(runner.optim_wrapper, BaseOptimWrapper):
+        print("  [vá] LR sau resume: BỎ QUA — optim_wrapper không phải "
+              "OptimWrapper đơn (OptimWrapperDict chưa hỗ trợ).")
+        return False
+
+    scheds_cu = runner.param_schedulers or []
+    if not any(getattr(s, "param_name", None) == "lr" for s in scheds_cu):
+        return False
+
+    if runner.iter <= 0 and runner.epoch <= 0:
+        return False                      # chạy mới, LR vừa dựng đã đúng
+
+    # `param_groups` của OptimWrapper = các nhóm thật + `base_param_settings`
+    # (nhóm giả mmengine dùng để in `base_lr`). Phải đặt lại CẢ nhóm giả: nó là
+    # con số duy nhất người đọc log nhìn thấy để kiểm lịch LR.
+    nhom = runner.optim_wrapper.param_groups
+    if any("initial_lr" not in g for g in nhom):
+        print("  [vá] LR sau resume: BỎ QUA — có nhóm tham số thiếu `initial_lr` "
+              "nên không dựng lại được giá trị gốc. LR của lần chạy này có thể "
+              "SAI (xem docs/NOTES.md §3.14).")
+        return False
+
+    # Dựng lịch mới bằng chính hàm mà `Runner.train()` dùng (nó dùng
+    # `self.optim_wrapper` đã dựng, và bỏ qua instance đã dựng sẵn — đã đọc
+    # source 0.10.7). Số lượng lịch phải khớp; khác thì thôi, không đoán.
+    moi = runner.build_param_scheduler(runner.cfg.param_scheduler)
+    if not isinstance(moi, list) or len(moi) != len(scheds_cu):
+        print(f"  [vá] LR sau resume: BỎ QUA — lịch trong config hiện tại khác "
+              f"cấu trúc với lịch đang chạy ({len(moi) if isinstance(moi, list) else type(moi).__name__} "
+              f"vs {len(scheds_cu)}).")
+        return False
+
+    # Kiểm tra xong hết mới sửa (ba bước dưới là thuần số học, không có nhánh
+    # nào ném lỗi giữa chừng).
+    for g in nhom:                        # 1. xoá dấu vết bước lúc dựng lịch
+        g["lr"] = g["initial_lr"]
+    for s in moi:                         # 2. chạy lịch MỚI tới đúng chỗ đang đứng
+        # Trả bộ đếm về trạng thái ngay-trước-bước-0: hàm dựng của mmengine đã
+        # gọi sẵn một bước `step()` (bước 0) lúc dựng `moi`, và bước ấy đã nhân
+        # `start_factor` vào LR trước khi ta kịp trả LR về `initial_lr`. Quên
+        # chỗ này thì chuỗi replay thiếu bước 0 -> thiếu hụt đúng 1/start_factor
+        # (lỗi thật gặp khi kiểm chứng: 1e-1 thay vì 1e-4). `_so_buoc_lich` tính
+        # cả bước 0 nên chạy đủ số nó trả về là khớp lần chạy liên tục.
+        s.last_step = -1
+        s._global_step = -1
+        for _ in range(_so_buoc_lich(s, runner.epoch, runner.iter)):
+            s.step()
+    runner.param_schedulers = moi         # 3. từ đây lịch mới là lịch đang chạy
+
+    lr = runner.optim_wrapper.get_lr()
+    print(f"  [vá] LR sau resume: đặt lại theo lịch — epoch {runner.epoch} / "
+          f"vòng {runner.iter} -> base_lr {lr['base_lr'][0]:.4e}, "
+          f"nhóm đầu {lr['lr'][0]:.4e}")
+    for s in moi:
+        print(f"       {type(s).__name__}: last_step={s.last_step} "
+              f"end={s.end}")
+    return True
+
+
+def dang_ky_va_lr_sau_resume(runner) -> None:
+    """Gắn bản vá LR vào runner, chạy ở mốc `before_train`.
+
+    Phải là hook chứ không gọi thẳng trước `runner.train()`: lúc ấy
+    `optim_wrapper` và `param_schedulers` còn là ConfigDict — `Runner.train()`
+    chỉ dựng chúng ở dòng 1733/1737, rồi tới dòng 1765 mới resume (đã đọc source
+    0.10.7). `before_train` là mốc SỚM NHẤT mà cả ba việc đã xong: wrapper dựng
+    rồi, lịch DỰNG RỒI, và trạng thái resume đã nạp. `ParamSchedulerHook` không
+    có `before_train` nên không có hook nào giành mất lượt đặt LR này.
+    """
+    from mmengine.hooks import Hook
+
+    class VaDatLaiLrSauResume(Hook):
+        def before_train(self, runner):
+            dat_lai_lr_sau_resume(runner)
+
+    runner.register_hook(VaDatLaiLrSauResume(), priority="VERY_HIGH")
+
+
 def main():
     in_utf8()
 
@@ -804,6 +958,9 @@ def main():
         print("Nếu work_dir đã có checkpoint, runner sẽ TỰ ĐỘNG resume từ bản mới "
               "nhất.\nMuốn train lại từ đầu: thêm --no-resume.")
     runner = Runner.from_cfg(cfg)
+    dang_ky_va_lr_sau_resume(runner)
+    print("  [vá] LR sau resume: đã gắn vào runner (chỉ can thiệp khi resume — "
+          "xem docs/NOTES.md §3.14).")
     runner.train()
 
 

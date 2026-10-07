@@ -938,17 +938,18 @@ Muốn giữ nhiều checkpoint hơn thì sửa `max_keep_ckpts` ở mục 8 c�
 | `test_mask_to_coco.py` | 106 |
 | `test_audit.py` | 103 |
 | `test_cai_moi_truong.py` | 59 |
-| `test_train.py` | **70** (63 trước §3.13 vòng 2, 58 trước §3.13 vòng 1, 49 trước §3.12) |
+| `test_train.py` | **89** (70 trước §3.14, 63 trước §3.13 vòng 2, 58 trước §3.13 vòng 1, 49 trước §3.12) |
 | `test_kiem_tra.py` | 41 |
 | `test_anchor.py` | 39 |
 | `test_overfit.py` | 37 |
 | `test_photometric.py` | 21 |
-| **Tổng** | **476** |
+| **Tổng** | **495** |
 
-Cả 8 bộ **PASS** ngày 01/10/2026, và chạy lại **PASS** ngày 07/10/2026 bốn lần:
+Cả 8 bộ **PASS** ngày 01/10/2026, và chạy lại **PASS** ngày 07/10/2026 năm lần:
 sau khi thêm mục 5b của §3.12, sau khi gia hạn `[3.10b]` lên 120 epoch, sau
-khi vá resume vòng 1 của §3.13 (mục 1c — 469 phép kiểm), và sau khi vá trọn
-danh sách cho phép vòng 2 (§3.13 — 476 phép kiểm). `test_train.py` chạy được cả trên máy sạch
+khi vá resume vòng 1 của §3.13 (mục 1c — 469 phép kiểm), sau khi vá trọn
+danh sách cho phép vòng 2 (§3.13 — 476 phép kiểm), và sau khi vá lỗi LR sau
+resume (§3.14 — 495 phép kiểm). `test_train.py` chạy được cả trên máy sạch
 chưa cài MMDetection vì `scripts/train.py` chỉ import mmdet/mmengine **bên trong
 hàm** — đây là ràng buộc thiết kế có chủ ý, và có một phép kiểm khoá đúng điều đó
 (nếu ai đó chuyển các import lên đầu tệp, test sẽ đỏ ngay).
@@ -1455,6 +1456,132 @@ lọc dtype bằng `issubclass(..., np.dtype)` + guard `hasattr(np, 'dtypes')`.
 **Số phép kiểm:** 464 → 469 (vòng 1) → **476** (vòng 2) (§3.5). Cả 8 bộ PASS
 trên máy 07/10/2026.
 
+### 3.14 Lỗi thật thứ tư trên Colab — lỗi IM LẶNG đầu tiên: resume train ở LR 1e-6 (07/10/2026)
+
+Ô `[3.10b]` giai đoạn 2 chạy **trọn vẹn, thoát 0**: resume từ epoch 40, chạy tiếp
+41..120, mAP 0,747 → **0,779** (mAP50 0,919; AP từng lớp ở epoch 120: flooded
+0,838 / non_flooded 0,720; đỉnh 0,781 ở epoch 115). Nhìn bề ngoài là một lần
+chạy tốt — bản vá §3.13 sống (dòng `[vá] torch.load: ...` in ra trước khi train),
+mAP epoch 41 ~0,747 chứ không ~0, loss giảm đều.
+
+Nhưng **cả 80 epoch train ở `base_lr: 1.0000e-06`**, `lr: 8.2354e-08`: đúng 80
+dòng log, không một dòng nào khác. Lịch đã định 1e-4 — **sai 100 lần**, và chốt
+ghi sẵn cho giai đoạn 2 (`base_lr: 1.0000e-04` trong 2–3 epoch đầu) đã bị bỏ qua
+mà không ai để ý, vì con số in ra vẫn là một con số "trông hợp lý".
+
+**Hệ quả: số của giai đoạn 2 KHÔNG dùng để chốt gì.** Nhánh "bão hoà < 0,9 →
+trần thật" không được phép áp dụng — bão hoà ở LR sai 100 lần thì không nói gì
+về trần thật. GATE 3 vẫn treo. Đây là lỗi đầu tiên trong đồ án mà **không có gì
+báo**: không exception, không mã thoát khác 0, không dòng log bất thường.
+
+**Chuỗi nhân quả** (4 bước, mỗi bước đối chiếu source mmengine 0.10.7):
+
+1. `save_optimizer=False` (config chính lẫn config chẩn đoán) → checkpoint không
+   chứa trạng thái optimizer → `Runner.resume()` bỏ qua bước nạp optimizer
+   (`if 'optimizer' in checkpoint and resume_optimizer`, `runner.py:2005`), và
+   các nhóm tham số **giữ nguyên LR vừa dựng từ config** (1e-3 ở config chẩn
+   đoán, 1e-4 ở config chính).
+2. `LinearLR(start_factor=0.001)` — `_ParamScheduler.__init__` kết thúc bằng
+   `self.step()` (`param_scheduler.py:129`), và bước thứ 0 ấy nhân thẳng
+   `start_factor` vào MỌI nhóm (`LinearParamScheduler._get_value`, dòng 791–795:
+   `group['lr'] * self.start_factor`): **1e-3 → 1e-6**. Ở config chính
+   (`lr=1e-4`, cùng `start_factor=0.001`): **1e-4 → 1e-7**.
+3. `resume()` sau đó nạp `param_schedulers` **từ checkpoint**
+   (`load_state_dict` = `self.__dict__.update`, dòng 152) — nạp về cả `end` lẫn
+   `last_step`/`_global_step` của lần chạy CŨ. Kết quả: cả hai lịch **đứng yên
+   vĩnh viễn** — `LinearLR` đã qua `end` (warmup xong từ epoch 5), còn
+   `MultiStepLR` có `last_step` ngoài khoảng `[begin, end=40)` nên không bước nào
+   còn được áp dụng nữa.
+4. Không còn bước nào hoàn lại được hệ số 0,001 ở (2). LR đứng nguyên ở 1e-6 suốt
+   80 epoch. **Và mốc giảm LR cũng không bao giờ nổ** — lịch bị đóng băng, nên
+   triệu chứng nhìn thấy là một con số SAI nhưng KHÔNG ĐỔI, chứ không phải một
+   đường LR méo mó dễ nhận ra.
+
+**Vì sao trước đó không ai thấy.** Đây là lần resume ĐẦU TIÊN chạy được tới nơi
+(§3.13 chặn hai lần trước đó ở bước đọc). §3.10 đã đọc source mmengine và kết
+luận đúng rằng resume khôi phục được `param_schedulers` — chính vì thế mà không
+ai ngờ rằng thứ được khôi phục ấy lại **đóng băng** lịch. Chú thích
+`save_optimizer=False` trong config chính cũng đã đọc source và kết luận đúng
+rằng resume "KHÔNG sập" — đúng, nó không sập, nó chỉ train sai 100 lần.
+
+**Dựng lại tại chỗ, khớp từng chữ số.** Không cần GPU: tải wheel mmengine 0.10.7
+về đọc source thật, dựng lại đúng đường resume của ô `[3.10b]` (AdamW nhiều nhóm
++ `OptimWrapper` + `LinearLR(end=50)` + `MultiStepLR(milestones=[30])`, resume
+`save_optimizer=False`), và in ra `base_lr` — **ra đúng `1.0000e-06` /
+`lr[0] = 8.2354e-08`, khớp từng chữ số với 80 dòng log Colab**. Đối chứng: nếu
+checkpoint CÓ optimizer thì LR sau resume đúng ngay — tức thủ phạm đúng là bước
+nạp optimizer bị bỏ qua.
+
+**Cách vá** (`scripts/train.py`, hàm `dat_lai_lr_sau_resume` + hook
+`dang_ky_va_lr_sau_resume`). Lịch của mmengine là hàm THUẦN của hai bộ đếm
+(`_global_step`, `last_step`) nhân lên giá trị hiện có của nhóm (đã đọc
+`_get_value` của cả hai lớp), nên dựng lại trạng thái đúng không cần mô phỏng
+công thức nào — chỉ cần chạy lại chính mã của mmengine:
+
+1. **Dựng lại lịch từ config HIỆN TẠI** (`runner.build_param_scheduler(runner.cfg.param_scheduler)`),
+   không dùng lại lịch trong checkpoint — lịch cũ đã đóng băng `end`/`milestones`
+   của lần chạy trước (gia hạn epoch mà không dựng lại thì mốc mới không bao giờ nổ).
+2. **Trả LR của mọi nhóm về `initial_lr`** (kể cả nhóm giả `base_param_settings`
+   mà mmengine dùng để in `base_lr` — con số duy nhất người đọc log nhìn thấy).
+3. **Trả CẢ HAI bộ đếm của lịch về `-1`** rồi chạy lại `_so_buoc_lich(...)` bước.
+   Chỗ này là chỗ suýt sai lần nữa: hàm dựng của mmengine gọi sẵn một bước
+   `step()` (bước 0) NGAY LÚC DỰNG `moi` — tức trước khi ta trả LR về
+   `initial_lr` — và bước ấy tiêu mất `last_step=0`. Chỉ trả LR mà không trả bộ
+   đếm thì chuỗi replay thiếu bước 0 và bù lại ở cuối, lệch đúng
+   `1/start_factor` = **1000 lần** — harness bắt được: LR ra **1e-1** thay vì
+   1e-4. Vì thế `_so_buoc_lich` tính CẢ bước 0, và hàm vá trả bộ đếm về `-1`
+   trước khi chạy lại.
+4. Gán `runner.param_schedulers = moi` — từ đây lịch mới là lịch đang chạy, kể
+   cả khi checkpoint tiếp theo được ghi.
+
+Hook chạy ở mốc `before_train` (priority `VERY_HIGH`) vì đó là mốc SỚM NHẤT mà cả
+ba việc đã xong: wrapper dựng rồi (1733), lịch dựng rồi (1737), và resume đã nạp
+xong (1765) — `ParamSchedulerHook` không có `before_train` nên không giành mất
+lượt đặt LR. Không phải resume thì hàm không đụng gì (`iter` và `epoch` đều 0).
+Vẫn **KHÔNG cần lưu optimizer**: khác biệt còn lại chỉ là các moment của AdamW
+khởi động lại — đúng thứ chú thích `save_optimizer=False` đã cân nhắc.
+
+**Kiểm chứng bằng Runner THẬT, không phải mô phỏng** (harness đặt ngoài repo,
+mmengine 0.10.7 + torch trên máy Windows, không cần GPU/mmdet). Dùng đúng
+`Runner.from_cfg` + `runner.train()` + hook thật, chỉ thay model bằng một mô-đun
+nhỏ và dataloader bằng 8 mẫu rỗng. Sáu ca, tất cả ĐẠT:
+
+| Ca | Kết quả |
+|---|---|
+| Chạy liên tục 120 epoch (tham chiếu) | warmup kết thúc trong epoch 13; mốc [30] nổ ở cuối epoch 30 (epoch 31 trở đi học ở 1e-4) |
+| Resume **không vá** | `1.0000e-06` — tái hiện đúng con số Colab |
+| Resume **có vá** | `1.0000e-04` ngay sau resume, và khớp lần chạy liên tục ở **MỌI** epoch 40..119 (không sai epoch nào) |
+| Chạy MỚI có vá | LR y hệt lần chạy sạch ở cả 120 epoch — vá không đụng vào chạy mới |
+| Mở rộng kèm MỐC MỚI `[30, 70]` | mốc 70 nổ đúng chỗ (1e-4 → 1e-5 ở cuối epoch 70) dù checkpoint cũ đóng băng `end=40` |
+| Resume GIỮA warmup (sau 1 epoch) | khớp lần chạy liên tục (1,6410e-04) |
+
+**Khoá bằng test** (mục 9, **18 phép kiểm AST** + 1 phép kiểm thư mục `2` ở mục
+5b, đã kiểm âm: bỏ hai dòng trả bộ đếm → đúng 1 test đỏ; bỏ `+ 1` của
+`_so_buoc_lich` → đỏ; đổi `priority="VERY_HIGH"` → đỏ; khôi phục thì xanh): hàm
+`_so_buoc_lich` trả `(...) + 1` (tính cả bước 0); hàm vá import TRONG hàm (giữ
+máy sạch chạy được bộ test); có đủ các nhánh báo rồi BỎ QUA thay vì sửa bừa
+(wrapper kiểu khác, không có lịch LR, chạy mới, thiếu `initial_lr`, lịch khác
+cấu trúc); dựng lại lịch từ config hiện tại; trả LR về `initial_lr`; trả CẢ HAI
+bộ đếm về -1 trong vòng `for s in moi`; chạy lại đúng `_so_buoc_lich(...)` bước;
+gán `runner.param_schedulers = moi`; hook có `before_train` + priority
+`VERY_HIGH`; `main()` đăng ký TRƯỚC `runner.train()`.
+
+**Giới hạn đã biết:** chỉ chạy cho `OptimWrapper` đơn (`OptimWrapperDict` — không
+có trong đồ án — thì hàm tự BỎ QUA kèm dòng in lý do, chứ không sửa bừa); replay
+chạy tuần tự từng lịch (đúng cho config của đồ án: cả hai lịch đều kiểu NHÂN lên
+giá trị hiện có, phép nhân giao hoán; nếu sau này trộn lịch "đặt giá trị tuyệt
+đối" với lịch "nhân" trên cùng một tham số thì phải xem lại).
+
+**Chạy lại giai đoạn 2 — lần hai.** Không resume được nữa: `epoch_40.pth` đã bị
+`max_keep_ckpts=2` xoá, và thư mục cũ đã ở epoch 120 (resume vào đó là no-op im
+lặng). Nên lần chạy đúng là **một lần chạy MỚI trọn 120 epoch trong
+`overfit20_hocvet2`** — đúng bằng lịch mà giai đoạn 1 + 2 đã định ghép lại. Bản
+vá không tham gia lần chạy này (nó chỉ can thiệp khi resume), nên phép kiểm nằm
+ở chính dòng log LR, ghi sẵn trong đầu config: cuối epoch 13 = `1.0000e-03`,
+và TỪ EPOCH 31 = `1.0000e-04` giữ tới hết. Chốt đọc không đổi.
+
+**Số phép kiểm:** 476 → **495**. Cả 8 bộ PASS trên máy 07/10/2026.
+
 ---
 
 ## 4. Việc tiếp theo
@@ -1531,16 +1658,28 @@ trên máy 07/10/2026.
      `add_safe_globals([HistoryBuffer])` trong `scripts/train.py`, khoá bằng 5 phép
      kiểm AST (đã kiểm âm). Chi tiết ở **§3.13** — lỗi này cũng sẽ chặn resume của
      `[3.11]` nếu không vá.
-6. **Bước kế tiếp ngay: chạy lại ô `[3.10b]` trên Colab cho giai đoạn 2** — chỉ gia
-   hạn 40 → 120 epoch, không đổi gì khác; lần chạy trước đã vá xong lỗi resume
-   (§3.13). `resume=True` tự nạp checkpoint epoch 40, chạy tiếp 41..120 ở nguyên
-   LR 1e-4 (~13 phút trên A100, ~50-60 phút trên T4). Phải **push lên GitHub
-   trước** — Colab clone code từ GitHub, chưa push là Colab chạy đúng bản cũ (chạy
-   lại mà chưa pull thì chỉ nạp checkpoint rồi thoát ngay, hoặc nổ lại lỗi cũ nếu
-   bản cũ). Trong log phải thấy dòng `[vá] torch.load: ...` trước khi train bắt
-   đầu. Ô `[3.3b]` tự cài môi trường (gọi `scripts/cai_moi_truong.py`, §1.9) nên
-   **không phải mở notebook 00 ở tab thứ hai**. Đọc kết quả theo chốt ghi sẵn ở
-   §3.12: **mAP > 0,95 → GATE 3 ĐẠT**; bão hoà < 0,9 → trần thật, đào bằng AP từng
-   lớp; 0,9–0,95 hoặc còn leo khi hết 120 → báo lại để quyết định cùng nhau.
-   Xong GATE 3 mới sang Phase 4.
+   - **`[3.10b]` giai đoạn 2 ngày 07/10/2026: chạy ĐƯỢC nhưng VÔ HIỆU.** Resume
+     từ epoch 40 chạy trọn 41..120 (thoát 0, mAP 0,747 → 0,779) — nhưng cả 80
+     epoch train ở `base_lr: 1.0000e-06`, **sai 100 lần** so với 1e-4 mà lịch đã
+     định. Không dùng số này để chốt gì (bão hoà ở LR sai không nói gì về trần
+     thật). **Lỗi thật thứ tư trên Colab — lần đầu tiên IM LẶNG**: không
+     exception, không mã thoát lạ, log in đúng con số sai ấy ở cả 80 dòng. Đã vá
+     bằng `dat_lai_lr_sau_resume` + hook `before_train`
+     (`scripts/train.py`), kiểm chứng bằng Runner THẬT (6 ca, khớp lần chạy liên
+     tục từng epoch), khoá bằng 18 phép kiểm AST (đã kiểm âm). Chi tiết ở
+     **§3.14**.
+6. **Bước kế tiếp ngay: chạy MỚI ô `[3.10b]` trên Colab — trọn 120 epoch trong
+   `overfit20_hocvet2`** (giai đoạn 2 lần đầu đã chạy nhưng vô hiệu vì lỗi LR
+   §3.14; `epoch_40.pth` cũng đã bị `max_keep_ckpts=2` xoá, và thư mục cũ đã ở
+   epoch 120 nên resume vào đó là no-op im lặng). ~20 phút trên A100, ~50-60 phút
+   trên T4. Phải **push lên GitHub trước** — Colab clone code từ GitHub, chưa
+   push là Colab chạy đúng bản cũ. Ô `[3.3b]` tự cài môi trường (gọi
+   `scripts/cai_moi_truong.py`, §1.9) nên **không phải mở notebook 00 ở tab thứ
+   hai**. Phép kiểm LR ghi sẵn ở đầu config (lần này KHÔNG có dòng `[vá] LR sau
+   resume` vì không resume): epoch 1–12 LR leo từ 1e-6 lên ~9,8e-4; cuối epoch 13
+   = **1.0000e-03**; TỪ EPOCH 31 = **1.0000e-04** giữ tới hết. Thấy 1e-6 sau
+   epoch 13 là warmup không chạy — dừng báo ngay. Đọc kết quả theo chốt ghi sẵn ở
+   §3.12/§3.14: **mAP > 0,95 → GATE 3 ĐẠT**; bão hoà < 0,9 → trần thật, đào bằng
+   AP từng lớp; 0,9–0,95 hoặc còn leo khi hết 120 → báo lại để quyết định cùng
+   nhau. Xong GATE 3 mới sang Phase 4.
    Không đụng tới `floodnet_raw.zip` 13 GB nữa — chỉ cần `floodnet_coco.zip` 1,86 GB.

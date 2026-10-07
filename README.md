@@ -28,7 +28,7 @@ Số liệu và phát hiện đã kiểm chứng thật: [`docs/NOTES.md`](docs/
 | 0 | Khởi tạo repo + kiểm tra môi trường Colab | ✅ **GATE 0 đạt** — chạy thật trên Colab T4, đã kiểm chứng đủ (`docs/NOTES.md` §1.5–§1.6) |
 | 1 | Khám phá dữ liệu (EDA) & quyết định tiền xử lý | ✅ **GATE 1 đạt (30/09/2026)** — 4 tham số đã chốt (`docs/NOTES.md` §2.5) |
 | 2 | Chuyển mask → COCO & tiền xử lý offline | ✅ **GATE 2 đạt (30/09/2026)** — 2.343 ảnh, 6.301 box, đối chiếu Phase 1 khớp hoàn toàn (`docs/NOTES.md` §2.7) |
-| 3 | Cấu hình model & sanity check (overfit 20 ảnh) | 🟡 **GATE 3 chưa đạt (07/10/2026)** — `[3.6]`–`[3.9]` xong (số đo `--dry-run`: 866,3 ms/vòng, 10,4 phút/epoch, VRAM 7,81/14,56 GB). `[3.10]` chạy lại bằng bản sửa `{{_base_.}}`: chạy sạch đủ 60/60 epoch nhưng mAP dừng ở **0,618** (bão hoà). Ô `[3.10b]` (học vẹt, tắt tăng cường, LR ×10) giai đoạn 1 (40 epoch): mAP **0,742** (mAP50 0,905) và đuôi đường cong **vẫn leo** — recipe là thứ chặn, lỗi đường ống chưa đứng vững thêm một bậc, nhưng mốc 0,95 chưa đạt. Giai đoạn 2 (gia hạn tới 120 epoch) đang chạy lại sau khi vá **lỗi thật thứ ba trên Colab** — resume nổ `_pickle.UnpicklingError` trên torch ≥ 2.6 (hai vòng: thiếu `HistoryBuffer`, rồi thiếu mảng numpy/dtype/`getattr` chứa trong nó), đã vá trọn bằng `add_safe_globals` trong `scripts/train.py` — danh sách rút từ source mmengine 0.10.7 và **kiểm chứng bằng checkpoint dựng lại tại chỗ**. Xem `docs/NOTES.md` §3.9, §3.11, §3.12, §3.13 |
+| 3 | Cấu hình model & sanity check (overfit 20 ảnh) | 🟡 **GATE 3 chưa đạt (07/10/2026)** — `[3.6]`–`[3.9]` xong (số đo `--dry-run`: 866,3 ms/vòng, 10,4 phút/epoch, VRAM 7,81/14,56 GB). `[3.10]` chạy lại bằng bản sửa `{{_base_.}}`: chạy sạch đủ 60/60 epoch nhưng mAP dừng ở **0,618** (bão hoà). Ô `[3.10b]` (học vẹt, tắt tăng cường, LR ×10) giai đoạn 1 (40 epoch): mAP **0,742** (mAP50 0,905) và đuôi đường cong **vẫn leo** — recipe là thứ chặn, lỗi đường ống chưa đứng vững thêm một bậc, nhưng mốc 0,95 chưa đạt. Lần nối tiếp tới 120 epoch (giai đoạn 2, chạy bằng `resume`) **đã chạy nhưng kết quả VÔ HIỆU**: cả 80 epoch train ở LR **1e-6** thay vì 1e-4 — **lỗi thật thứ tư trên Colab, lần đầu tiên IM LẶNG** (`save_optimizer=False` làm resume bỏ qua optimizer; `LinearLR` nhân sẵn `start_factor` lúc dựng; trạng thái lịch trong checkpoint đóng băng LR), đã vá bằng `dat_lai_lr_sau_resume` + hook `before_train` trong `scripts/train.py`, **kiểm chứng bằng Runner thật** (6 ca, khớp lần chạy liên tục từng epoch). Bước kế tiếp: chạy **MỚI** trọn 120 epoch trong `runs/sanity/overfit20_hocvet2` — resume không còn đường (checkpoint epoch 40 đã bị `max_keep_ckpts=2` xoá, thư mục cũ đã ở epoch 120). Xem `docs/NOTES.md` §3.9, §3.11–§3.14 |
 | 4 | Huấn luyện baseline (E1) | ⏳ |
 | 5 | Đánh giá mAP + sai số đếm & phân tích lỗi | ⏳ |
 | 6 | Thí nghiệm cải thiện & ablation (E2–E7) | ⏳ |
@@ -152,13 +152,21 @@ Mở `notebooks/03_train.ipynb` và chạy từ trên xuống:
 | `[3.8]` | Dựng `instances_overfit20.json` (20 ảnh, seed 42) | vài giây |
 | `[3.9]` | **`train.py --dry-run`** — chạy thử vài vòng, đo thời gian 1 epoch thật (GATE 3) | ~5 phút |
 | `[3.10]` | Train overfit 20 ảnh — **phép thử đường ống** (GATE 3) | 20–40 phút |
-| `[3.10b]` | **Chỉ chạy khi `[3.10]` chưa đạt** — học vẹt điều kiện dễ nhất (tắt tăng cường, LR ×10) để phân biệt lỗi đường ống với recipe | 10–60 phút |
+| `[3.10b]` | **Chỉ chạy khi `[3.10]` chưa đạt** — học vẹt điều kiện dễ nhất (tắt tăng cường, LR ×10) để phân biệt lỗi đường ống với recipe; lần này chạy mới trọn 120 epoch | 20–60 phút |
 | `[3.11]` | Train thật (Phase 4) | 6–8 giờ |
 
 **Dừng sau ô `[3.10]` (hoặc `[3.10b]` nếu `[3.10]` chưa đạt) và báo cáo lại.** Ô
 `[3.10b]` chỉ chạy khi `[3.10]` chưa đạt mốc 0,9 — kết quả đọc theo chốt ghi sẵn ở
 `docs/NOTES.md` §3.12. Giai đoạn 1 (40 epoch) chạy 07/10/2026 dừng ở 0,742 còn leo;
-chạy lại chính ô đó (sau `git pull`) để `resume` chạy tiếp giai đoạn 2 tới 120 epoch — lần resume đầu tiên từng nổ HAI lần trên torch ≥ 2.6 (lần đầu thiếu `HistoryBuffer`, lần sau thiếu mảng numpy/dtype/`getattr` chứa trong nó), đã vá trọn ở `scripts/train.py` (`docs/NOTES.md` §3.13); log phải in dòng `[vá] torch.load: ...` trước khi train bắt đầu.
+lần resume (nối tới 120 epoch) **vô hiệu vì lỗi LR im lặng** (§3.14) nên lần chạy
+đúng là chạy **MỚI** trọn 120 epoch trong `runs/sanity/overfit20_hocvet2`, sau
+`git pull`. Log phải in hai dòng `[vá]` trước khi train bắt đầu: `[vá] torch.load: ...`
+(resume từng nổ HAI lần trên torch ≥ 2.6 — thiếu `HistoryBuffer`, rồi thiếu mảng
+numpy/dtype/`getattr` chứa trong nó — đã vá trọn ở `scripts/train.py`, §3.13) và
+`[vá] LR sau resume: ...` (§3.14). Rồi liếc 2 dòng LR: cuối epoch 13 phải là
+`base_lr: 1.0000e-03`, từ epoch 31 phải là `base_lr: 1.0000e-04`. Ô chạy xong trong
+vài giây, không in dòng epoch nào = chưa `git pull` (config cũ trỏ vào thư mục đã ở
+epoch 120, resume thành no-op).
 Ô `[3.11]` là Phase 4, chỉ
 chạy sau khi chốt GATE 3 — 24 epoch trong config hiện tại là **mặc định tạm**.
 
@@ -186,7 +194,7 @@ chứng minh điều gì.
 | `src/floodcount/infer/` | `predict.py` (ảnh → box + số đếm), `tta_wbf.py` |
 | `scripts/` | Lệnh CLI mỏng gọi vào `src/`; `cai_moi_truong.py` — cài + vá môi trường Colab, dùng chung cho notebook 00 và 03 |
 | `notebooks/` | Notebook **mỏng** cho Colab — chỉ gọi script, không chứa logic |
-| `tests/` | **476 phép kiểm** trong 8 bộ test, chạy trên máy CPU — không cần GPU, không cần dataset thật (dùng zip giả có cả bẫy ColorMasks). `test_train.py` kiểm được cả trên máy **chưa cài MMDetection**, vì `scripts/train.py` chỉ import mmdet/mmengine bên trong hàm (và khoá luôn thứ tự build `optim_wrapper` của vòng đo `--dry-run` — lỗi thật đã gặp, §3.8 NOTES); `test_cai_moi_truong.py` khoá cách dò wheel `mmcv` và ba miếng vá môi trường |
+| `tests/` | **495 phép kiểm** trong 8 bộ test, chạy trên máy CPU — không cần GPU, không cần dataset thật (dùng zip giả có cả bẫy ColorMasks). `test_train.py` kiểm được cả trên máy **chưa cài MMDetection**, vì `scripts/train.py` chỉ import mmdet/mmengine bên trong hàm (và khoá luôn thứ tự build `optim_wrapper` của vòng đo `--dry-run` — lỗi thật đã gặp, §3.8 NOTES); `test_cai_moi_truong.py` khoá cách dò wheel `mmcv` và ba miếng vá môi trường |
 | `outputs/` | Ảnh minh hoạ, overlay, biểu đồ (không đưa lên git) |
 | `requirements-colab.txt` | Bản ghi các gói cài thêm vào Colab (đọc phần đầu file trước khi dùng) |
 

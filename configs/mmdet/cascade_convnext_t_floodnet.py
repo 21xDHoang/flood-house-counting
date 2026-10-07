@@ -516,6 +516,18 @@ default_hooks = dict(
         # chắc: `Runner.resume()` có guard `if 'optimizer' in checkpoint`, nên
         # resume từ checkpoint không có optimizer KHÔNG sập — chỉ là các moment
         # của AdamW được khởi động lại, ảnh hưởng vài chục vòng lặp đầu.
+        #
+        # ⚠️ Nhưng "không sập" KHÔNG có nghĩa là "không sao": vì optimizer
+        # không được nạp, các nhóm tham số giữ nguyên LR vừa dựng từ config, và
+        # bước `step()` mà hàm dựng `LinearLR` gọi sẵn lúc dựng nhân luôn
+        # `start_factor` (0,001) vào đó; trạng thái lịch nạp từ checkpoint sau
+        # đó thì đóng băng ở lần chạy cũ. Kết quả: resume xong train ở LR 1e-7
+        # (rồi 1e-8 sau mốc [16]) mà log chỉ in ra con số ấy, không có cảnh báo
+        # nào — lỗi thật đã xảy ra ở ô [3.10b] giai đoạn 2, xem docs/NOTES.md
+        # §3.14. `scripts/train.py` có bản vá `dat_lai_lr_sau_resume` (chạy ở
+        # `before_train`) đặt lại LR theo đúng lịch sau mỗi lần resume, đã kiểm
+        # chứng khớp lần chạy liên tục từng epoch — nên `save_optimizer=False`
+        # vẫn giữ được.
         save_optimizer=False),
     logger=dict(type='LoggerHook', interval=50),
     # Nói rõ `draw=False` dù mặc định đã là vậy: mmdet 3.3.0 trong
