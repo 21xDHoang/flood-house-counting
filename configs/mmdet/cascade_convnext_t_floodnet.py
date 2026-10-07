@@ -445,10 +445,19 @@ test_evaluator = dict(
 # ===========================================================================
 # 6. LỊCH TRAIN
 # ===========================================================================
-# 24 epoch là MẶC ĐỊNH TẠM — GATE 3 yêu cầu đo thời gian 1 epoch trên Colab rồi
-# người dùng chốt lại con số. Mốc giảm LR đặt theo tỉ lệ của bản gốc COCO
-# (27/36 = 75%, 33/36 = 92%) chứ không copy nguyên [27, 33] của bản gốc.
-max_epochs = 24
+# 60 epoch — ĐÃ CHỐT 07/10/2026, sau khi GATE 3 ĐẠT (ô [3.10b], docs/NOTES.md
+# §3.15; quyết định cùng người dùng, căn cứ §4 mục 6). Con số 24 trước đây chỉ là
+# MẶC ĐỊNH TẠM, chưa từng được chốt. Căn cứ chọn 60:
+#   - [3.9] đo 10,4 phút/epoch trên T4 (~3 giờ trên A100) → 60 epoch ≈ 10,4 giờ
+#     T4, gọn trong ngân sách Colab; và checkpoint tốt nhất được chọn theo VAL
+#     (save_best) nên epoch dư chỉ tốn thời gian, không làm hỏng kết quả báo cáo;
+#   - 60 epoch ở batch 2 (tích luỹ gradient 4 → batch hiệu dụng 8) = ~10.900 bước
+#     cập nhật — đủ dài cho lịch LR anneal hết chu kỳ, mà không kéo dài vô ích.
+# Mốc giảm LR [40, 55] giữ ĐÚNG TỈ LỆ của bản cũ ([16, 22] trên 24 = 2/3 và
+# ~11/12, tức 66,7% và 91,7% — không copy nguyên [27, 33] của bản gốc COCO) và
+# trùng luôn với lịch mà overfit20.py đã chạy ở GATE 3 ([40, 55] trên 60 epoch).
+# `scripts/train.py` tự giãn mốc theo cùng tỉ lệ nếu ô [3.1] đổi `SO_EPOCH`.
+max_epochs = 60
 
 train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=max_epochs, val_interval=1)
 val_cfg = dict(type='ValLoop')
@@ -468,7 +477,7 @@ param_scheduler = [
         begin=0,
         end=max_epochs,
         by_epoch=True,
-        milestones=[16, 22],
+        milestones=[40, 55],
         gamma=0.1)
 ]
 

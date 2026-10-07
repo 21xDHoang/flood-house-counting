@@ -367,8 +367,10 @@ def main():
              f"config overfit20: moi vai tro tro cung mot tep, thuc te {ra3}")
 
         print("\n=== 3. dat_lai_so_epoch: chinh milestones theo TI LE ===")
-        # Gia tri that cua config do an: 24 epoch, moc [16, 22].
-        def chay(so_epoch_moi, goc=24, moc=(16, 22), warmup=1000):
+        # Gia tri that cua config do an TU 07/10/2026 (chot o GATE 3, NOTES §4
+        # muc 6): 60 epoch, moc [40, 55] — ti le 2/3 va ~11/12 giu nguyen tu ban
+        # 24 epoch/[16, 22] truoc do, nen moi ket qua ky vong o duoi khong doi.
+        def chay(so_epoch_moi, goc=60, moc=(40, 55), warmup=1000):
             cfg_gia = CfgGia(
                 train_cfg=CfgGia(max_epochs=goc),
                 param_scheduler=[
@@ -379,22 +381,22 @@ def main():
             canh_bao = train.dat_lai_so_epoch(cfg_gia, so_epoch_moi)
             return cfg_gia, canh_bao
 
-        # 16/24*12 = 8 ; 22/24*12 = 11
+        # 40/60*12 = 8 ; 55/60*12 = 11
         cfg12, _ = chay(12)
         kiem(cfg12.train_cfg.max_epochs == 12, "max_epochs duoc ghi de")
         kiem(cfg12.param_scheduler[1]["milestones"] == [8, 11],
-             f"12 epoch -> moc [8, 11] (16/24*12 va 22/24*12), "
+             f"12 epoch -> moc [8, 11] (40/60*12 va 55/60*12), "
              f"thuc te {cfg12.param_scheduler[1]['milestones']}")
         kiem(cfg12.param_scheduler[1]["end"] == 12,
              f"`end` cua MultiStepLR phai theo so epoch moi, "
              f"thuc te {cfg12.param_scheduler[1]['end']}")
 
-        # 16/24*8 = 5.33 -> 5 ; 22/24*8 = 7.33 -> 7
+        # 40/60*8 = 5.33 -> 5 ; 55/60*8 = 7.33 -> 7
         cfg8, _ = chay(8)
         kiem(cfg8.param_scheduler[1]["milestones"] == [5, 7],
              f"8 epoch -> moc [5, 7], thuc te {cfg8.param_scheduler[1]['milestones']}")
 
-        # 22/24*6 = 5.5 -> round(5.5) = 6 (lam tron ve so chan cua Python), roi
+        # 55/60*6 = 5.5 -> round(5.5) = 6 (lam tron ve so chan cua Python), roi
         # bi kep xuong so_epoch-1 = 5: moc giam o dung epoch cuoi la vo nghia.
         cfg6, _ = chay(6)
         kiem(cfg6.param_scheduler[1]["milestones"] == [4, 5],
@@ -403,7 +405,7 @@ def main():
         kiem(all(m < 6 for m in cfg6.param_scheduler[1]["milestones"]),
              "khong moc nao nam ngoai pham vi epoch")
 
-        # 22/24*2 = 1.83 -> 2, kep xuong 1 ; 16/24*2 = 1.33 -> 1. Ca hai thanh 1.
+        # 55/60*2 = 1.83 -> 2, kep xuong 1 ; 40/60*2 = 1.33 -> 1. Ca hai thanh 1.
         cfg2, _ = chay(2)
         kiem(cfg2.param_scheduler[1]["milestones"] == [1],
              f"2 epoch -> moc [1] (hai moc gop lai), "
@@ -417,11 +419,12 @@ def main():
         kiem(any("giữ nguyên suốt lần chạy" in c for c in cb1),
              f"1 epoch -> canh bao LR khong bao gio giam, thuc te {cb1}")
 
-        # Giu nguyen so epoch thi moc phai y nguyen.
-        cfg24, _ = chay(24)
-        kiem(cfg24.param_scheduler[1]["milestones"] == [16, 22],
-             f"24 epoch (khong doi) -> moc giu nguyen [16, 22], "
-             f"thuc te {cfg24.param_scheduler[1]['milestones']}")
+        # Giu nguyen so epoch thi moc phai y nguyen (chay lai dung con so da
+        # chot o GATE 3, khong duoc lech mot moc nao).
+        cfg60, _ = chay(60)
+        kiem(cfg60.param_scheduler[1]["milestones"] == [40, 55],
+             f"60 epoch (khong doi) -> moc giu nguyen [40, 55], "
+             f"thuc te {cfg60.param_scheduler[1]['milestones']}")
 
         # Warmup tinh bang VONG LAP: luon phai canh bao de nguoi doc tu doi chieu
         # voi so vong moi epoch in o phan do --dry-run.

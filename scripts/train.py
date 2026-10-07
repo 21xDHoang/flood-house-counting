@@ -10,8 +10,9 @@ cũng là gần như toàn bộ thân của `tools/train.py` sau khi parse tham 
 
 Lý do rất cụ thể: mmdet có ít nhất ba kiểu hỏng KHÔNG báo lỗi, chỉ làm kết quả
 sai âm thầm (liệt kê ở đầu `src/floodcount/data/kiem_tra.py`). Một suất train
-24 epoch trên Colab là 6–8 giờ; phát hiện sai ở epoch 20 nghĩa là mất trắng
-suất đó, mà nguyên nhân thì nằm ở dữ liệu chứ không ở code. Tiền kiểm ở đây
+trên Colab T4 là hàng giờ (60 epoch ≈ 10,4 giờ theo số đo `[3.9]`); phát hiện
+sai ở epoch 40 nghĩa là mất trắng suất đó, mà nguyên nhân thì nằm ở dữ liệu
+chứ không ở code. Tiền kiểm ở đây
 đối chiếu tên lớp, đếm lại số box mmdet THỰC SỰ nhận được, và in ra các tham
 số then chốt — tất cả trước khi động tới GPU.
 

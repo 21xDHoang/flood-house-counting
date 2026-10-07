@@ -153,7 +153,7 @@ Mở `notebooks/03_train.ipynb` và chạy từ trên xuống:
 | `[3.9]` | **`train.py --dry-run`** — chạy thử vài vòng, đo thời gian 1 epoch thật (GATE 3) | ~5 phút |
 | `[3.10]` | Train overfit 20 ảnh — **phép thử đường ống** (GATE 3) | 20–40 phút |
 | `[3.10b]` | **Chỉ chạy khi `[3.10]` chưa đạt** — học vẹt điều kiện dễ nhất (tắt tăng cường, LR ×10) để phân biệt lỗi đường ống với recipe. **Đã chạy xong 07/10/2026** (120 epoch, best mAP 0,952 → GATE 3 ĐẠT) | 20–60 phút |
-| `[3.11]` | Train thật (Phase 4) | 6–8 giờ |
+| `[3.11]` | Train thật (Phase 4) — **60 epoch đã chốt 07/10/2026** (mốc LR [40, 55]) | ~10,4 giờ T4 / ~3 giờ A100 (ước tính; `[3.9]` in số thật) |
 
 **GATE 3 đã chốt ĐẠT ngày 07/10/2026** (số đo đầy đủ: `docs/NOTES.md` §3.15). Ô
 `[3.10b]` chạy mới trọn 120 epoch trong `runs/sanity/overfit20_hocvet2`: mAP ≥ 0,95
@@ -171,10 +171,11 @@ lần chạy đúng: 10 vòng/epoch nên warmup 50 vòng hết ở **cuối epoc
 đầu tiên ghi nhầm "epoch 13", con số đó suy nhầm từ harness đo 4 vòng/epoch (đính
 chính ở §3.15); từ epoch 31 là `base_lr: 1.0000e-04` tới hết epoch 120.
 
-Bước kế tiếp: **chốt recipe cho `[3.11]`** — số epoch theo ngân sách thời gian (24
-epoch trong config hiện tại là **mặc định tạm**; ~10,4 phút/epoch trên T4), giữ
-`base_lr` 1e-4, giữ nguyên tăng cường cho baseline E1 (`docs/NOTES.md` §4 mục 6) —
-rồi mới chạy `[3.11]`, và **push lên GitHub trước** khi Colab chạy.
+Recipe của `[3.11]` **đã chốt 07/10/2026** (`docs/NOTES.md` §4 mục 6): **60 epoch**
+(mốc giảm LR [40, 55] — trùng lịch mà `overfit20.py` đã chạy ở GATE 3; ≈10,4 giờ
+trên T4 / ~3 giờ trên A100, `[3.9]` in số thật), giữ `base_lr` 1e-4, giữ nguyên
+tăng cường cho baseline E1. Việc còn lại chỉ là chạy `[3.11]` — và **push lên
+GitHub trước** khi Colab chạy.
 
 Điều notebook này **không** làm: **không chạy test trên tập test**. Test chỉ được chạy
 **một lần duy nhất** ở Phase 5; chọn ngưỡng đếm và chọn checkpoint đều lấy từ val. Tập
@@ -293,8 +294,9 @@ học. Transform tự viết chỉ tăng/giảm sáng và tương phản, giữ 
 Phần train thật chỉ là `Runner.from_cfg(cfg).train()` — một dòng. Thứ đáng viết là
 phần **tiền kiểm** chạy trước đó một phút: mmdet có ít nhất ba kiểu hỏng **không báo
 lỗi** (tên lớp không khớp JSON → bỏ im lặng cả một lớp; `keep_ratio` thiếu → ảnh méo;
-`num_classes` sót ở một trong ba tầng cascade). Một suất train 24 epoch là 6–8 giờ,
-phát hiện sai ở epoch 20 là mất trắng. Tiền kiểm in ra và **dừng** nếu có vấn đề.
+`num_classes` sót ở một trong ba tầng cascade). Một suất train 60 epoch là hàng giờ
+GPU (≈10,4 giờ trên T4), phát hiện sai ở epoch 40 là mất trắng. Tiền kiểm in ra và
+**dừng** nếu có vấn đề.
 
 **Vì sao phải chạy thử overfit 20 ảnh trước khi train thật?**
 Để chứng minh đường ống chạy được đầu-cuối (dữ liệu đọc đúng, nhãn gắn đúng lớp, loss

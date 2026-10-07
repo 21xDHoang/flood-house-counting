@@ -1650,8 +1650,10 @@ chọn recipe cho train thật:
 - **không kết luận được gì về tăng cường** từ `[3.10b]`: phép thử cố ý đổi hai biến
   cùng lúc (tắt tăng cường + LR ×10) — đúng như thiết kế đã ghi ở đầu config; tách
   biến là việc của Phase 4, không phải của GATE;
-- **số epoch**: đo được từ `[3.9]` là ~10,4 phút/epoch trên T4 (866,3 ms/vòng) →
-  quyết định theo ngân sách thời gian, không phải theo phép thử overfit này.
+- **số epoch: chốt 60** (07/10/2026, quyết định cùng người dùng — chi tiết ở §4
+  mục 6): đo được từ `[3.9]` là ~10,4 phút/epoch trên T4 (866,3 ms/vòng) → ~10,4
+  giờ T4 / ~3 giờ A100; quyết định theo ngân sách thời gian chứ không phải theo
+  phép thử overfit này.
 
 ---
 
@@ -1746,19 +1748,26 @@ chọn recipe cho train thật:
      mAP75 = **1,000** ở cả hai lớp; AP vật nhỏ 0,900. Đường ống đã được chứng
      minh — thứ chặn `[3.10]` là recipe, không phải lỗi dữ liệu. Số đo đầy đủ ở
      **§3.15**.
-6. **Bước kế tiếp: chốt recipe cho `[3.11]` (Phase 4 — train thật trên 2.343 ảnh),
-   rồi mới chạy.** GATE 3 đã đạt nên không còn phép thử nào phải chạy nữa. Ba thứ
-   cần chốt, căn cứ §3.15:
-   - **số epoch**: mặc định 24 trong `cascade_convnext_t_floodnet.py` là con số
-     TẠM, chưa chốt; đo đạc `[3.9]` cho ~10,4 phút/epoch trên T4 → chốt theo ngân
-     sách thời gian chạy được;
-   - **lịch LR**: giữ `base_lr` 1e-4 (bằng chứng: 1e-3 chỉ loanh quanh 0,45 sau 30
-     epoch); `scripts/train.py` tự chỉnh mốc giảm LR theo tỉ lệ khi đổi số epoch;
-   - **tăng cường**: lượt baseline E1 giữ nguyên recipe hiện tại (GATE 3 không tách
+6. **Recipe của `[3.11]` (Phase 4 — train thật trên 2.343 ảnh) ĐÃ CHỐT ngày
+   07/10/2026; việc còn lại chỉ là chạy.** Ba mục, căn cứ §3.15:
+   - **số epoch: 60** (quyết định cùng người dùng; dự kiến chạy trên A100). Căn
+     cứ: `[3.9]` đo 10,4 phút/epoch trên T4 → 60 epoch ≈ 10,4 giờ T4 / ~3 giờ
+     A100 (ước tính — `[3.9]` in số thật trên máy đang chạy); checkpoint tốt nhất
+     chọn theo VAL (`save_best`) nên epoch dư chỉ tốn thời gian, không làm hỏng
+     số báo cáo; 60 epoch ở batch hiệu dụng 8 ≈ 10.900 bước cập nhật — đủ cho
+     lịch LR anneal hết một chu kỳ. Con số 24 trước đây là mặc định TẠM, chưa
+     từng được chốt.
+   - **lịch LR**: giữ `base_lr` 1e-4 (bằng chứng: 1e-3 chỉ loanh quanh 0,45 sau
+     30 epoch); mốc giảm LR [40, 55] giữ đúng tỉ lệ cũ (2/3 và ~11/12, tức 66,7%
+     và 91,7%) và trùng luôn lịch mà `overfit20.py` đã chạy ở GATE 3. Ô `[3.1]`
+     đã để `SO_EPOCH = 60` và config chính cũng vậy; `scripts/train.py` tự giãn
+     mốc theo cùng tỉ lệ nếu sau này đổi số epoch.
+   - **tăng cường**: baseline E1 giữ nguyên recipe hiện tại (GATE 3 không tách
      được biến này — `[3.10b]` cố ý đổi hai thứ cùng lúc); tách biến là việc của
-     các thí nghiệm E2–E7.
+     các thí nghiệm E2–E7. Muốn đổi số epoch cho một thí nghiệm thì phải ghi lại
+     lý do: E2–E7 so với E1 nên phải chạy cùng recipe.
 
-   Sau khi chốt: chạy ô `[3.11]` trên Colab. Ô đó **tự resume** nếu `work_dir` trên
+   Rồi chạy ô `[3.11]` trên Colab. Ô đó **tự resume** nếu `work_dir` trên
    Drive đã có checkpoint (cả hai lỗi resume đã vá: §3.13 và §3.14) nên Colab ngắt
    giữa chừng thì cứ chạy lại — không mất kết quả. Ô `[3.3b]` tự cài môi trường
    (gọi `scripts/cai_moi_truong.py`, §1.9) nên **không phải mở notebook 00 ở tab
