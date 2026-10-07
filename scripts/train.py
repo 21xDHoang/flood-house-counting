@@ -615,24 +615,40 @@ def va_torch_load_resume():
     """Vá tương thích torch >= 2.6 cho đường RESUME (lỗi thật trên Colab).
 
     Từ torch 2.6, `torch.load` mặc định `weights_only=True` và từ chối nạp mọi
-    lớp không nằm trong danh sách an toàn. Checkpoint của mmengine lưu cả
-    `message_hub` (lịch sử loss) nên bên trong có `HistoryBuffer` — và mmengine
-    0.10.7 gọi `torch.load(filename, map_location=...)` trần, không truyền
-    `weights_only`. Vì thế lần ĐẦU TIÊN đồ án thật sự resume (07/10/2026, ô
-    [3.10b] giai đoạn 2) nổ ngay lúc nạp checkpoint epoch 40:
+    lớp/hàm không nằm trong danh sách an toàn — trong khi mmengine 0.10.7 gọi
+    `torch.load(filename, map_location=...)` trần, không truyền `weights_only`.
+    Vì thế lần ĐẦU TIÊN đồ án thật sự resume (07/10/2026, ô [3.10b] giai đoạn 2)
+    nổ ngay lúc nạp checkpoint epoch 40, và phải vá HAI vòng mới sạch:
 
-        _pickle.UnpicklingError: Weights only load failed ...
-        Unsupported global: GLOBAL mmengine.logging.history_buffer.HistoryBuffer
+      - vòng 1 (chỉ cho phép lớp `HistoryBuffer`) vẫn nổ ở
+        `numpy._core.multiarray._reconstruct`: `HistoryBuffer` lưu dữ liệu BÊN
+        TRONG bằng hai mảng numpy (`_log_history`, `_count_history`) — cho phép
+        lớp chứa chưa đủ, còn phải cho phép thứ nó CHỨA.
+      - vòng 2 (thêm mảng numpy) vẫn nổ ở `numpy.dtypes.Float64DType` (numpy 2
+        dựng lại dtype qua lớp mô tả riêng, torch kiểm tra ĐÚNG lớp), rồi nổ
+        tiếp ở `getattr` (xem chú thích dưới).
 
-    Trước đó chưa lần nào chạm vào đường này vì mọi lần chạy đều là work_dir
-    mới; còn [3.11] hễ Colab ngắt là phải resume, nên phải vá trước khi đốt
-    6 giờ GPU (số đo đầy đủ: docs/NOTES.md §3.13).
+    Danh sách dưới đây KHÔNG phải đoán: rút từ mã nguồn mmengine 0.10.7
+    (`HistoryBuffer.__getstate__` + `MessageHub.state_dict` +
+    `Runner.save_checkpoint`) rồi DỰNG LẠI một checkpoint đúng cấu trúc đó ngay
+    trên máy này (numpy 2.5, torch >= 2.6, dùng chính mã nguồn HistoryBuffer
+    thật) — tái hiện y hệt thứ tự thông báo lỗi trên Colab trước khi nạp sạch.
+    Số đo + cách kiểm: docs/NOTES.md §3.13.
 
-    Vá bằng cách cho phép ĐÚNG lớp `HistoryBuffer` — đúng như chính thông báo
-    lỗi gợi ý — thay vì hạ `weights_only=False` cho mọi checkpoint: phần còn
-    lại của checkpoint vẫn được nạp ở chế độ an toàn. Torch cũ không có
-    `add_safe_globals` (khi đó mặc định đã là `weights_only=False`) thì không
-    có gì phải vá.
+    Vài điểm đáng chú ý:
+      - `HistoryBuffer.min` và 3 hàm thống kê còn lại KHÔNG cần đăng ký riêng:
+        tên có dấu chấm nên pickle protocol 2 (mặc định của torch.save) viết
+        chúng thành `getattr(HistoryBuffer, 'min')` — chỉ cần cho phép `getattr`.
+      - `getattr` đăng ký HAI kiểu: object (tên suy ra là `builtins.getattr`) và
+        tuple tên cũ `__builtin__.getattr`. Torch đời mới tự đổi `__builtin__`
+        thành `builtins` khi đọc, đời cũ hơn thì không — khỏi phụ thuộc phiên bản.
+      - `np.dtypes.*` (chỉ có ở numpy >= 2) là các lớp mô tả dtype — cùng nhóm an
+        toàn với `np.dtype`, đăng ký cả bộ khỏi phải đoán mảng chứa dtype nào.
+
+    Vẫn là cho phép ĐÚNG những thứ checkpoint mmengine cần, KHÔNG hạ
+    `weights_only=False` cho mọi checkpoint: phần còn lại vẫn được nạp ở chế độ
+    an toàn. Torch cũ không có `add_safe_globals` (khi đó mặc định đã là
+    `weights_only=False`) thì không có gì phải vá.
 
     Trả về True nếu đã áp vá, để hàm gọi in một dòng log xác nhận.
     """
@@ -640,9 +656,32 @@ def va_torch_load_resume():
 
     if not hasattr(torch.serialization, "add_safe_globals"):
         return False
+
+    import numpy as np
     from mmengine.logging.history_buffer import HistoryBuffer
 
-    torch.serialization.add_safe_globals([HistoryBuffer])
+    # numpy >= 2 đổi tên module C: numpy.core -> numpy._core (numpy cũ thì ngược lại).
+    try:
+        from numpy._core.multiarray import _reconstruct, scalar
+    except ImportError:  # numpy < 2
+        from numpy.core.multiarray import _reconstruct, scalar
+
+    # numpy >= 2 mới có np.dtypes; lọc đúng các lớp mô tả dtype (np.dtypes.Float64DType...).
+    lop_dtype = []
+    if hasattr(np, "dtypes"):
+        lop_dtype = [v for v in vars(np.dtypes).values()
+                     if isinstance(v, type) and issubclass(v, np.dtype)]
+
+    torch.serialization.add_safe_globals([
+        HistoryBuffer,
+        getattr,
+        (getattr, "__builtin__.getattr"),
+        _reconstruct,
+        scalar,
+        np.ndarray,
+        np.dtype,
+        *lop_dtype,
+    ])
     return True
 
 
@@ -758,8 +797,8 @@ def main():
 
     from mmengine.runner import Runner
     if va_torch_load_resume():
-        print("  [vá] torch.load: đã cho phép HistoryBuffer — checkpoint mmengine "
-              "resume được (xem docs/NOTES.md §3.13).")
+        print("  [vá] torch.load: đã cho phép HistoryBuffer + mảng numpy + lớp dtype "
+              "+ getattr — checkpoint mmengine resume được (xem docs/NOTES.md §3.13).")
     print(f"\nBắt đầu train. Log và checkpoint ghi vào:\n    {cfg.work_dir}")
     if resume:
         print("Nếu work_dir đã có checkpoint, runner sẽ TỰ ĐỘNG resume từ bản mới "

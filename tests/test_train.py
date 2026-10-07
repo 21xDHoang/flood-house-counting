@@ -169,8 +169,12 @@ def main():
         # Loi that 07/10/2026: lan DAU TIEN do an resume (o [3.10b] giai doan 2)
         # no _pickle.UnpicklingError — torch >= 2.6 mac dinh weights_only=True,
         # ma checkpoint mmengine chua HistoryBuffer (message_hub), lop khong nam
-        # trong danh sach an toan. Test nay khoa: xoa ham va / bo loi goi di la
-        # FAIL. Chi tiet: docs/NOTES.md §3.13.
+        # trong danh sach an toan. Cho phep MOI HistoryBuffer (vong 1) VAN no:
+        # du lieu ben trong no la HAI MANG NUMPY -> thieu _reconstruct; roi thieu
+        # lop mo ta dtype (numpy 2) va getattr (ten co dau cham, pickle protocol 2
+        # viet thanh getattr(HistoryBuffer, 'min')). Test nay khoa CA danh sach da
+        # kiem chung o vong 2 — xoa ham va hoac bo bat ky manh nao la FAIL (kiem am
+        # da chay). Chi tiet: docs/NOTES.md §3.13.
         ham_va = next((n for n in ast.walk(cay)
                        if isinstance(n, ast.FunctionDef)
                        and n.name == "va_torch_load_resume"), None)
@@ -201,8 +205,8 @@ def main():
                               and e.id == "HistoryBuffer"
                               for e in n.args[0].elts)]
             kiem(bool(goi_va),
-                 "...goi add_safe_globals([HistoryBuffer]) — dung lop ma "
-                 "thong bao loi chi ten")
+                 "...goi add_safe_globals voi list chua HistoryBuffer — lop "
+                 "dau tien thong bao loi chi ten")
 
             # Import torch / HistoryBuffer phai nam TRONG ham: de len dau tep
             # la ca bo test nay khong chay noi o may sach.
@@ -218,6 +222,64 @@ def main():
             kiem(all(import_trong_ham.values()),
                  f"import torch / HistoryBuffer nam trong ham, thuc te "
                  f"{import_trong_ham!r}")
+
+            # --- Vong 2: danh sach phai du cho NHUNG GI HistoryBuffer CHUA ---
+            # (chieu cho phep ca lop chua la chua du). Cac manh duoi day rut tu
+            # source mmengine 0.10.7 + checkpoint dung lai tai cho (NOTES §3.13).
+            ds_cho_phep = [n.args[0].elts for n in ast.walk(ham_va)
+                           if isinstance(n, ast.Call)
+                           and isinstance(n.func, ast.Attribute)
+                           and n.func.attr == "add_safe_globals"
+                           and n.args and isinstance(n.args[0], ast.List)]
+            elts = ds_cho_phep[0] if ds_cho_phep else []
+            ten = {e.id for e in elts if isinstance(e, ast.Name)}
+            attr = {e.attr for e in elts if isinstance(e, ast.Attribute)}
+
+            kiem({"getattr", "_reconstruct", "scalar"} <= ten,
+                 f"danh sach co getattr (ten co dau cham) + _reconstruct/scalar "
+                 f"(mang numpy), thuc te {sorted(ten)}")
+            kiem({"ndarray", "dtype"} <= attr,
+                 f"danh sach co np.ndarray/np.dtype, thuc te {sorted(attr)}")
+            kiem(any(isinstance(e, ast.Tuple) and any(
+                         isinstance(t, ast.Constant)
+                         and t.value == "__builtin__.getattr"
+                         for t in e.elts) for e in elts),
+                 "co cap (getattr, '__builtin__.getattr') — ten module kieu "
+                 "pickle cu, torch doi moi thi tu doi thanh builtins")
+            kiem(any(isinstance(e, ast.Starred) for e in elts),
+                 "danh sach trai *lop_dtype (cac lop mo ta dtype cua numpy)")
+
+            # numpy >= 2 doi ten module C: numpy.core -> numpy._core; phai co
+            # CA HAI duong, du phong nam trong try/except ImportError.
+            nguon_np = {n.module for n in ast.walk(ham_va)
+                        if isinstance(n, ast.ImportFrom)}
+            kiem({"numpy._core.multiarray", "numpy.core.multiarray"} <= nguon_np,
+                 f"nap _reconstruct/scalar tu numpy._core VA co du phong "
+                 f"numpy.core, thuc te {sorted(nguon_np)}")
+            nam_trong_try = {
+                n.module for t in ast.walk(ham_va) if isinstance(t, ast.Try)
+                for h in t.handlers
+                if isinstance(h.type, ast.Name) and h.type.id == "ImportError"
+                for n in ast.walk(t) if isinstance(n, ast.ImportFrom)}
+            kiem("numpy.core.multiarray" in nam_trong_try,
+                 "du phong numpy.core nam trong try/except ImportError")
+
+            # Loc lop dtype tu vars(np.dtypes) bang issubclass(v, np.dtype), co
+            # guard hasattr(np, 'dtypes') vi numpy < 2 khong co np.dtypes.
+            co_loc_dtype = any(
+                isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                and n.func.id == "issubclass" for n in ast.walk(ham_va))
+            co_guard_dtypes = any(
+                isinstance(n, ast.If) and any(
+                    isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+                    and c.func.id == "hasattr"
+                    and any(isinstance(a, ast.Constant) and a.value == "dtypes"
+                            for a in c.args)
+                    for c in ast.walk(n.test))
+                for n in ast.walk(ham_va))
+            kiem(co_loc_dtype and co_guard_dtypes,
+                 "lop dtype loc bang issubclass(..., np.dtype) + guard "
+                 "hasattr(np, 'dtypes') cho numpy < 2")
 
         # Voi toi main(): loi goi va phai DUNG TRUOC runner.train() — resume
         # xay ra ben trong train(), goi sau la da qua muon.

@@ -938,16 +938,17 @@ Muốn giữ nhiều checkpoint hơn thì sửa `max_keep_ckpts` ở mục 8 c�
 | `test_mask_to_coco.py` | 106 |
 | `test_audit.py` | 103 |
 | `test_cai_moi_truong.py` | 59 |
-| `test_train.py` | **63** (58 trước §3.13, 49 trước §3.12, 47 trước §3.11) |
+| `test_train.py` | **70** (63 trước §3.13 vòng 2, 58 trước §3.13 vòng 1, 49 trước §3.12) |
 | `test_kiem_tra.py` | 41 |
 | `test_anchor.py` | 39 |
 | `test_overfit.py` | 37 |
 | `test_photometric.py` | 21 |
-| **Tổng** | **469** |
+| **Tổng** | **476** |
 
-Cả 8 bộ **PASS** ngày 01/10/2026, và chạy lại **PASS** ngày 07/10/2026 ba lần:
-sau khi thêm mục 5b của §3.12, sau khi gia hạn `[3.10b]` lên 120 epoch, và sau
-khi vá resume của §3.13 (mục 1c — 469 phép kiểm). `test_train.py` chạy được cả trên máy sạch
+Cả 8 bộ **PASS** ngày 01/10/2026, và chạy lại **PASS** ngày 07/10/2026 bốn lần:
+sau khi thêm mục 5b của §3.12, sau khi gia hạn `[3.10b]` lên 120 epoch, sau
+khi vá resume vòng 1 của §3.13 (mục 1c — 469 phép kiểm), và sau khi vá trọn
+danh sách cho phép vòng 2 (§3.13 — 476 phép kiểm). `test_train.py` chạy được cả trên máy sạch
 chưa cài MMDetection vì `scripts/train.py` chỉ import mmdet/mmengine **bên trong
 hàm** — đây là ràng buộc thiết kế có chủ ý, và có một phép kiểm khoá đúng điều đó
 (nếu ai đó chuyển các import lên đầu tệp, test sẽ đỏ ngay).
@@ -1329,10 +1330,12 @@ Thấy > 0,95 là dừng được — checkpoint epoch vừa xong đã ghi ra Dr
 đổi `max_epochs` 40 → 120 và mục 5b của test khoá theo số mới (vẫn **464** phép
 kiểm, cả 8 bộ PASS lại trên máy 07/10/2026).
 
-**Lần chạy thử ĐẦU của giai đoạn 2 (07/10/2026, 12:09) nổ ngay khi resume** —
+**Hai lần chạy thử đầu của giai đoạn 2 (07/10/2026) nổ ngay khi resume** —
 `_pickle.UnpicklingError` trên torch ≥ 2.6, chưa epoch nào chạy, checkpoint
-`epoch_40.pth` còn nguyên. Đây là lỗi thật thứ ba trên Colab; đã vá và khoá bằng
-test ở **§3.13**. Chạy lại ô `[3.10b]` sau khi pull code mới.
+`epoch_40.pth` còn nguyên (lần hai nổ sau khi vá vòng 1, ở global numpy). Đây là
+lỗi thật thứ ba trên Colab; đã vá TRỌN — hai vòng, có bằng chứng dựng lại
+checkpoint tại chỗ — và khoá bằng test ở **§3.13**. Chạy lại ô `[3.10b]` sau khi
+pull code mới.
 
 ### 3.13 Lỗi thật thứ ba trên Colab: resume nổ `_pickle.UnpicklingError` (torch ≥ 2.6, 07/10/2026)
 
@@ -1363,8 +1366,8 @@ resume chưa từng được THỰC THI. Bài học lặp lại lần thứ ba: 
 được một lần chạy thật — và đây là lỗi đầu tiên thuộc loại "code của mình đúng
 nhưng môi trường đổi mặc định".
 
-**Vá** (`scripts/train.py`, hàm `va_torch_load_resume()`, gọi trong `main()`
-ngay trước `runner.train()`): cho phép ĐÚNG lớp `HistoryBuffer` bằng
+**Vá vòng 1** (`scripts/train.py`, hàm `va_torch_load_resume()`, gọi trong
+`main()` ngay trước `runner.train()`): cho phép ĐÚNG lớp `HistoryBuffer` bằng
 `torch.serialization.add_safe_globals([HistoryBuffer])` — đúng như chính thông
 báo lỗi gợi ý — thay vì hạ `weights_only=False` cho mọi checkpoint; phần còn
 lại của checkpoint vẫn được nạp ở chế độ an toàn. Torch cũ không có
@@ -1372,14 +1375,85 @@ lại của checkpoint vẫn được nạp ở chế độ an toàn. Torch cũ 
 qua, không cần vá. Lúc chạy, log in một dòng `[vá] torch.load: ...` để xác nhận
 vá đã sống.
 
-**Khoá bằng test** (mục 1c, **5 phép kiểm AST**, đã kiểm âm — bỏ lời gọi là test
-đỏ): hàm vá tồn tại; có guard `hasattr`; gọi đúng
-`add_safe_globals([HistoryBuffer])`; import `torch` / `HistoryBuffer` nằm TRONG
-hàm (giữ được tính "test trên máy sạch"); và quan trọng nhất — `main()` gọi hàm
-vá TRƯỚC `runner.train()`, vì resume xảy ra bên trong `train()`, gọi sau là đã
-quá muộn.
+#### Vòng 2 (cùng buổi 07/10/2026): cho phép lớp chứa vẫn CHƯA đủ
 
-**Số phép kiểm:** 464 → **469** (§3.5). Cả 8 bộ PASS trên máy 07/10/2026.
+Đẩy vòng 1 lên, người dùng chạy lại ô `[3.10b]`. Dòng `[vá]` in ra (vá đã sống)
+nhưng resume vẫn nổ — ở một global KHÁC, đọc thẳng từ checkpoint:
+
+```
+_pickle.UnpicklingError: ... Unsupported global:
+GLOBAL numpy._core.multiarray._reconstruct
+```
+
+Vẫn không mất gì (nổ ở bước ĐỌC, `epoch_40.pth` còn nguyên, 0 epoch chạy).
+**Bài học của vòng 1:** cho phép LỚP chứa chưa đủ — còn phải cho phép thứ nó
+CHỨA. `HistoryBuffer` lưu dữ liệu bên trong bằng **hai mảng numpy**
+(`_log_history`, `_count_history`); mảng numpy lại cần `_reconstruct` và — trên
+numpy ≥ 2 — cả các **lớp mô tả dtype**.
+
+**Truy tới cùng bằng cách dựng lại checkpoint tại chỗ (không cần GPU).** Tải
+wheel mmengine 0.10.7 (`pip download --no-deps`, không đụng môi trường) rồi đọc
+nguồn thật: `HistoryBuffer.__getstate__` (nhét 4 hàm thống kê `min/max/current/
+mean` vào state), `MessageHub.state_dict`, `Runner.save_checkpoint`,
+`ParamScheduler.state_dict`. Kết luận: ngoài `HistoryBuffer` + mảng numpy, phần
+còn lại của checkpoint chỉ là dict/int/float/chuỗi/tensor — tức **chỉ còn đúng
+hai cơ chế lạ** phải xử lý. Sau đó dựng LẠI một checkpoint đúng cấu trúc đó
+ngay trên máy Windows (numpy 2.5.1, torch 2.14.0+cpu — cùng thế hệ ≥ 2.6), đặt
+nguồn `history_buffer.py` THẬT vào đúng đường dẫn module để pickle ghi ra đúng
+tên `mmengine.logging.history_buffer.HistoryBuffer`, rồi leo từng nấc lỗi y hệt
+Colab — mỗi nấc chỉ qua được khi thêm đúng mảnh còn thiếu:
+
+1. chỉ `HistoryBuffer` → nổ `numpy._core.multiarray._reconstruct` — **khớp y
+   nguyên thông báo Colab thứ hai**;
+2. thêm `_reconstruct`/`scalar`/`np.ndarray` → nổ
+   `numpy.dtypes.Float64DType`: numpy 2 dựng lại dtype qua lớp mô tả riêng và
+   torch kiểm tra ĐÚNG lớp (`type(inst)`), nên phải đăng ký cả bộ lớp trong
+   `np.dtypes` (lọc bằng `issubclass(v, np.dtype)` — 33 lớp; `np.dtypes` chỉ có
+   từ numpy 2, có guard `hasattr`);
+3. thêm bộ dtype → nổ `getattr`: tên có dấu chấm (`HistoryBuffer.min`) nên
+   pickle protocol 2 (mặc định của `torch.save`) viết chúng thành
+   `getattr(HistoryBuffer, 'min')` — **4 hàm thống kê không cần đăng ký riêng,
+   chỉ cần `getattr`**. Phụ chú: dạng tuple `(getattr, "__builtin__.getattr")`
+   bị torch mới vô hiệu vì khi đọc nó tự đổi `__builtin__` → `builtins`; vẫn
+   đăng ký cả hai kiểu khỏi phụ thuộc phiên bản torch.
+
+**Danh sách cho phép chốt** (giữ đúng nguyên tắc "cho phép ĐÚNG thứ cần, không
+hạ `weights_only=False`"):
+
+```python
+torch.serialization.add_safe_globals([
+    HistoryBuffer,
+    getattr, (getattr, "__builtin__.getattr"),
+    _reconstruct, scalar, np.ndarray, np.dtype, *lop_dtype,
+])
+```
+
+**Bằng chứng chạy trên máy (07/10/2026).** Script kiểm (đặt ngoài repo) rút
+CHÍNH hàm `va_torch_load_resume` từ `scripts/train.py` (nguyên văn, không chép
+tay) rồi: (a) đối chứng chưa vá — nổ đúng câu `Unsupported global: GLOBAL
+mmengine.logging.history_buffer.HistoryBuffer` như Colab; (b) gọi hàm rồi nạp
+lại — **sạch**: `_log_history [1. 0.9 0.8 0.7 0.6]` dtype `float64`, `mean()`
+ra đúng số học (0,4), 4 hàm thống kê khôi phục, `param_schedulers` giữ
+`milestones [30]`, tensor nguyên vẹn. Khác vòng 1 ở chỗ: danh sách lần này rút
+từ SOURCE của đúng phiên bản mmengine đang chạy và dựng lại bằng đúng source
+đó, tái hiện được cả hai thông báo lỗi Colab trước khi nạp sạch — không còn
+mảnh nào là suy đoán. Nếu Colab vẫn còn nổ ở global thứ tư thì thông báo lỗi in
+thẳng tên nó: thêm một mảnh vào danh sách là xong (mỗi mảnh đều có tên và lý
+do — đúng thứ `weights_only=False` đánh mất).
+
+**Khoá bằng test** (mục 1c, **12 phép kiểm AST** — 5 của vòng 1 + 7 của vòng 2,
+đã kiểm âm: bỏ `_reconstruct`/`scalar`/`*lop_dtype` khỏi danh sách là 2 test đỏ
+đúng chỗ, khôi phục thì xanh): hàm vá tồn tại; có guard `hasattr`; list chứa
+`HistoryBuffer`; import `torch` / `HistoryBuffer` nằm TRONG hàm (giữ được tính
+"test trên máy sạch"); `main()` gọi hàm vá TRƯỚC `runner.train()` (resume xảy ra
+bên trong `train()`, gọi sau là đã quá muộn); list có `getattr` +
+`_reconstruct`/`scalar`; có `np.ndarray`/`np.dtype`; có cặp tuple
+`__builtin__.getattr`; có trải `*lop_dtype`; nạp được từ CẢ HAI đường
+`numpy._core` và `numpy.core`; dự phòng nằm trong `try/except ImportError`; và
+lọc dtype bằng `issubclass(..., np.dtype)` + guard `hasattr(np, 'dtypes')`.
+
+**Số phép kiểm:** 464 → 469 (vòng 1) → **476** (vòng 2) (§3.5). Cả 8 bộ PASS
+trên máy 07/10/2026.
 
 ---
 
