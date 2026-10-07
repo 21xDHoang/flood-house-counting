@@ -938,14 +938,15 @@ Muốn giữ nhiều checkpoint hơn thì sửa `max_keep_ckpts` ở mục 8 c�
 | `test_mask_to_coco.py` | 106 |
 | `test_audit.py` | 103 |
 | `test_cai_moi_truong.py` | 59 |
-| `test_train.py` | **49** (47 trước §3.11) |
+| `test_train.py` | **58** (49 trước §3.12, 47 trước §3.11) |
 | `test_kiem_tra.py` | 41 |
 | `test_anchor.py` | 39 |
 | `test_overfit.py` | 37 |
 | `test_photometric.py` | 21 |
-| **Tổng** | **455** |
+| **Tổng** | **464** |
 
-Cả 8 bộ **PASS** ngày 01/10/2026. `test_train.py` chạy được cả trên máy sạch
+Cả 8 bộ **PASS** ngày 01/10/2026, và chạy lại **PASS** ngày 07/10/2026 sau khi
+thêm mục 5b của §3.12. `test_train.py` chạy được cả trên máy sạch
 chưa cài MMDetection vì `scripts/train.py` chỉ import mmdet/mmengine **bên trong
 hàm** — đây là ràng buộc thiết kế có chủ ý, và có một phép kiểm khoá đúng điều đó
 (nếu ai đó chuyển các import lên đầu tệp, test sẽ đỏ ngay).
@@ -1181,6 +1182,96 @@ pháp đó. Đã dùng tới nó thì phải có một phép kiểm chạm vào 
 mmengine xử lý xong — không phép kiểm nào trong repo này làm được điều đó nếu
 không chạy thật, nên cách rẻ nhất là **đừng dùng**.
 
+### 3.12 Lần chạy lại [3.10] ngày 07/10/2026: bản sửa §3.11 SỐNG, nhưng GATE 3 CHƯA ĐẠT (mAP 0,618)
+
+Bản sửa §3.11 được chạy lại trên Colab. **Tiền kiểm ĐẠT HẾT** — đúng thứ cần
+kiểm chứng: `[2]` trỏ `instances_overfit20.json` cho cả train / val /
+val_evaluator (không còn chuỗi rác), `[2b]` xác nhận 20/20 ảnh nằm trong
+`images/train/`. Chạy sạch: 60/60 epoch, thoát 0, không NaN, checkpoint "best"
+nằm ở chính epoch cuối.
+
+**Máy:** Colab cấp **A100-SXM4-40GB** (không phải T4 như dự kiến — số thời gian
+dưới đây KHÔNG dùng để lên kế hoạch cho T4). mmdet 3.3.0 / mmcv 2.2.0 /
+mmengine 0.10.7 / torch 2.11.0+cu130. Tập overfit: 20 ảnh / 125 box. Cả lần
+chạy (60 epoch = 600 vòng) mất **8 phút 52 giây** (11:24:44 → 11:33:36),
+0,26 s/vòng lúc cuối, VRAM 6.509 MB.
+
+**Số đo mAP trên chính 20 ảnh train** (val_dataloader của overfit20 = 20 ảnh đó):
+
+| Epoch | mAP | mAP50 | ghi chú |
+|---|---|---|---|
+| 1–4 | 0,000 | 0,000 | warmup 50 vòng (5 epoch) — chưa kịp học |
+| 5 | 0,035 | 0,119 | bắt đầu nhích |
+| 20 | 0,127 | 0,327 | |
+| 29 | 0,315 | 0,632 | |
+| 39 | 0,518 | 0,862 | |
+| 40 | 0,413 | 0,833 | dao động thường (epoch 30 cũng tụt vậy) — CHƯA liên quan LR |
+| 48 | 0,588 | 0,885 | leo lại và vượt mức cũ |
+| 52–54 | 0,602–0,609 | ~0,89 | chững lại TRƯỚC mốc giảm LR [55] |
+| 55 | 0,613 | 0,887 | |
+| 56–60 | 0,611 → 0,618 | 0,888 | 5 epoch cuối nhích tổng +0,005 |
+
+Chốt epoch 60: mAP 0,618 / mAP50 0,888 / mAP75 0,754 (small 0,245 — medium
+0,559 — large 0,690), AR 0,707.
+
+**Phán quyết — GATE 3 CHƯA ĐẠT**, theo đúng tiêu chí do `overfit20.py` tự viết:
+"thấy mAP > 0.9 là đủ kết luận" và "nếu chạy tới cuối mà mAP vẫn thấp thì là lỗi
+thật, không phải 'cần thêm epoch'". 0,618 < 0,9, và đuôi đường cong đã bão hoà
+(5 epoch cuối +0,005) — không thể là chuyện thiếu epoch.
+
+**Nhưng phán quyết đó KHÔNG nói đường ống có lỗi** — chỗ dễ đọc sai nhất. Kiểu
+hỏng "mAP ~0 vì nhãn / đường dẫn / eval sai" đã bị loại: loss giảm đều, RPN hội
+tụ (`loss_rpn_cls` 0,0152 / `loss_rpn_bbox` 0,0169), đầu phân loại cả ba stage
+đạt acc ~92–95%, mAP lớn dần qua suốt 60 epoch. Model CÓ học; nó học chậm và
+dừng thấp. Câu hỏi mở: đường ống có khả năng **học vẹt** hay không, hay có lỗi
+thật (nhãn / box / loss / eval) mà biểu hiện là trần thấp?
+
+**Hai nghi phạm, cả hai đều thuộc recipe chứ không thuộc dữ liệu hay code:**
+
+1. **Tăng cường quá mạnh cho một bài thuộc lòng.** Mỗi epoch, cùng một ảnh lại
+   vào ở một tỉ lệ khác (5 mức), lật với xác suất 0,75 (3 hướng), đổi sáng.
+   Model phải học bất biến theo tỉ lệ TỪ 20 ẢNH trước khi thuộc lòng được —
+   ngược hẳn mục đích của phép thử.
+2. **Lịch LR tự bóp.** Cả lần chạy chỉ 600 vòng. Ba pha LR đo được từ log:
+   epoch 1–40 chạy `base_lr` 1e-4, epoch 41–55 chạy 1e-5, epoch 56–60 chạy 1e-6
+   (`lr` của layer_0 lần lượt 8,2e-06 → 8,2e-07 → 8,2e-08). Đường cong chững từ
+   epoch 52–54, tức TRƯỚC khi mốc [55] kịp giảm lần hai — nhưng đừng đọc ngược:
+   chững ở 1e-5 chỉ nói 1e-5 không đủ đẩy tiếp, không chứng minh 1e-4 sẽ đủ.
+   Đó chính là việc của phép thử dưới đây.
+
+**Phép thử phân biệt — ô `[3.10b]`, config `overfit20_hocvet.py`.** Giữ NGUYÊN
+dữ liệu, nhãn, kiến trúc, hàm loss và phép đo (`val_dataloader` không bị ghi đè
+→ so được trực tiếp với [3.10]); chỉ hạ hai nghi phạm về điều kiện dễ nhất:
+pipeline train = y hệt pipeline lúc ĐÁNH GIÁ (bỏ toàn bộ tăng cường), LR ×10
+(1e-3) với MỘT mốc giảm ở epoch 30 trên 40 epoch, thêm `classwise=True` để có
+AP theo từng lớp, `work_dir` riêng (chống `resume=True` chạy tiếp nhầm
+checkpoint cũ). Cách đọc kết quả, chốt trước khi chạy để không tự huyễn hoặc:
+
+- **mAP > 0,95** → đường ống ĐÚNG, thứ chặn [3.10] là recipe → **GATE 3 ĐẠT**.
+  (Không suy ngược gì cho train thật: LR 1e-4 + lịch [16,22]/24 epoch của config
+  chính là để train 1.445 ảnh, không phải để thuộc lòng 20 ảnh.)
+- **Vẫn ~0,6x và bão hoà** → lúc đó mới là lỗi thật trong nhãn / box / loss /
+  eval; log lần này in kèm AP từng lớp để khoanh vùng tiếp.
+
+Một chi tiết của [3.10] cần liếc mắt khi chạy [3.10b]: log có 240 dòng cảnh báo
+"bbox/polygon is out of bounds" (4 dòng/epoch) phát ra từ **bước VẼ ảnh minh
+hoạ** của visualizer, không phải bước tính metric (metric tính trên toạ độ gốc,
+không đi qua đường vẽ). Nghi do làm tròn toạ độ khi resize nhưng chưa kiểm
+chứng — nên mở vài ảnh trong `runs/sanity/overfit20_hocvet/vis_data` xem box vẽ
+có ĐÚNG CHỖ không; box vẽ lệch thật thì đó là manh mối, không còn là chuyện thẩm
+mỹ.
+
+**Khoá lại bằng test** (`tests/test_train.py` mục 5b, đọc config bằng `ast`,
+không cần mmengine) — 9 phép kiểm giữ đúng những gì làm nên giá trị của phép
+thử: pipeline train chỉ còn 4 bước không tăng cường; Resize của train TRÙNG
+Resize của `test_pipeline` ở config chính; LR 1e-3; một mốc [30] trên 40 epoch;
+`classwise=True`; `work_dir` khác hẳn của [3.10]; `val_dataloader` không bị ghi
+đè; `_base_` đúng `./overfit20.py`; và tệp tồn tại. "Dọn dẹp" config rồi chạy
+nhầm một lần khác thì phép chẩn đoán mất giá trị mà không có gì báo — đúng loại
+lỗi im lặng mà §3.11 vừa dạy.
+
+**Số phép kiểm:** 455 → 464 (§3.5). Cả 8 bộ PASS trên máy ngày 07/10/2026.
+
 ---
 
 ## 4. Việc tiếp theo
@@ -1241,10 +1332,17 @@ không chạy thật, nên cách rẻ nhất là **đừng dùng**.
      trong config con hoá thành đường dẫn rác, **không lỗi nào báo**. Đã bỏ hẳn cú pháp
      đó khỏi repo (config con tự viết đường dẫn) và cấm nó bằng test ở mức cả thư mục
      `configs/`. Chi tiết ở **§3.11**.
-6. **Bước kế tiếp ngay: chạy LẠI ô `[3.10]` của `notebooks/03_train.ipynb` trên Colab T4.**
-   Phải **push bản sửa §3.11 lên GitHub trước** — Colab clone code từ GitHub, chưa push là
-   Colab chạy lại đúng bản cũ và hỏng y hệt. Ô `[3.3b]` tự cài môi trường (gọi
+   - **Lần chạy lại `[3.10]` ngày 07/10/2026**: bản sửa §3.11 SỐNG (tiền kiểm đạt hết,
+     chạy đủ 60/60 epoch, thoát 0) nhưng mAP dừng ở **0,618** so với mốc 0,9 mà chính
+     `overfit20.py` đặt ra, đuôi đường cong bão hoà → **GATE 3 chưa đạt**. Nghi phạm
+     thuộc recipe (tăng cường + lịch LR bóp trong 600 vòng), không phải lỗi đã chứng
+     minh. Số đo đầy đủ và phép thử phân biệt ở **§3.12**.
+6. **Bước kế tiếp ngay: chạy ô `[3.10b]` của `notebooks/03_train.ipynb` trên Colab.**
+   Đây là phép thử phân biệt của §3.12: học vẹt 20 ảnh với điều kiện dễ nhất (tắt
+   tăng cường, LR ×10, 40 epoch). Phải **push lên GitHub trước** — Colab clone code
+   từ GitHub, chưa push là Colab chạy đúng bản cũ. Ô `[3.3b]` tự cài môi trường (gọi
    `scripts/cai_moi_truong.py`, §1.9) nên **không phải mở notebook 00 ở tab thứ hai**.
-   Dừng ở phép thử overfit 20 ảnh và báo cáo lại (số epoch, loss, mAP tiến gần 1.0 không)
-   trước khi sang Phase 4.
+   Đọc kết quả theo chốt ghi sẵn ở §3.12: **mAP > 0,95 → GATE 3 ĐẠT**; vẫn ~0,6x và
+   bão hoà → lỗi thật trong nhãn/box/loss/eval, đào tiếp bằng AP từng lớp trong log.
+   Xong GATE 3 mới sang Phase 4.
    Không đụng tới `floodnet_raw.zip` 13 GB nữa — chỉ cần `floodnet_coco.zip` 1,86 GB.

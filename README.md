@@ -28,7 +28,7 @@ Số liệu và phát hiện đã kiểm chứng thật: [`docs/NOTES.md`](docs/
 | 0 | Khởi tạo repo + kiểm tra môi trường Colab | ✅ **GATE 0 đạt** — chạy thật trên Colab T4, đã kiểm chứng đủ (`docs/NOTES.md` §1.5–§1.6) |
 | 1 | Khám phá dữ liệu (EDA) & quyết định tiền xử lý | ✅ **GATE 1 đạt (30/09/2026)** — 4 tham số đã chốt (`docs/NOTES.md` §2.5) |
 | 2 | Chuyển mask → COCO & tiền xử lý offline | ✅ **GATE 2 đạt (30/09/2026)** — 2.343 ảnh, 6.301 box, đối chiếu Phase 1 khớp hoàn toàn (`docs/NOTES.md` §2.7) |
-| 3 | Cấu hình model & sanity check (overfit 20 ảnh) | 🟡 **GATE 3 đang chạy trên Colab (01/10/2026)** — `[3.6]`–`[3.9]` xong (số đo `--dry-run`: 866,3 ms/vòng, 10,4 phút/epoch, VRAM 7,81/14,56 GB); `[3.10]` lần đầu hỏng vì cú pháp `{{_base_.}}` hỏng im lặng, đã sửa — chờ chạy lại. Xem `docs/NOTES.md` §3.9 và §3.11 |
+| 3 | Cấu hình model & sanity check (overfit 20 ảnh) | 🟡 **GATE 3 chưa đạt (07/10/2026)** — `[3.6]`–`[3.9]` xong (số đo `--dry-run`: 866,3 ms/vòng, 10,4 phút/epoch, VRAM 7,81/14,56 GB). `[3.10]` chạy lại bằng bản sửa `{{_base_.}}`: chạy sạch đủ 60/60 epoch nhưng mAP dừng ở **0,618** so với mốc 0,9 của chính phép thử, đuôi bão hoà. Nghi phạm thuộc recipe (tăng cường + lịch LR bóp trong 600 vòng), chưa chứng minh lỗi đường ống — ô `[3.10b]` (học vẹt, tắt tăng cường, LR ×10) là phép thử phân biệt. Xem `docs/NOTES.md` §3.9, §3.11, §3.12 |
 | 4 | Huấn luyện baseline (E1) | ⏳ |
 | 5 | Đánh giá mAP + sai số đếm & phân tích lỗi | ⏳ |
 | 6 | Thí nghiệm cải thiện & ablation (E2–E7) | ⏳ |
@@ -152,10 +152,13 @@ Mở `notebooks/03_train.ipynb` và chạy từ trên xuống:
 | `[3.8]` | Dựng `instances_overfit20.json` (20 ảnh, seed 42) | vài giây |
 | `[3.9]` | **`train.py --dry-run`** — chạy thử vài vòng, đo thời gian 1 epoch thật (GATE 3) | ~5 phút |
 | `[3.10]` | Train overfit 20 ảnh — **phép thử đường ống** (GATE 3) | 20–40 phút |
+| `[3.10b]` | **Chỉ chạy khi `[3.10]` chưa đạt** — học vẹt điều kiện dễ nhất (tắt tăng cường, LR ×10) để phân biệt lỗi đường ống với recipe | 6–30 phút |
 | `[3.11]` | Train thật (Phase 4) | 6–8 giờ |
 
-**Dừng sau ô `[3.10]` và báo cáo lại.** Ô `[3.11]` là Phase 4, chỉ chạy sau khi chốt số
-epoch từ phép đo ở `[3.9]` — 24 epoch trong config hiện tại là **mặc định tạm**.
+**Dừng sau ô `[3.10]` (hoặc `[3.10b]` nếu `[3.10]` chưa đạt) và báo cáo lại.** Ô
+`[3.10b]` chỉ chạy khi `[3.10]` chưa đạt mốc 0,9 — kết quả đọc theo chốt ghi sẵn ở
+`docs/NOTES.md` §3.12. Ô `[3.11]` là Phase 4, chỉ
+chạy sau khi chốt GATE 3 — 24 epoch trong config hiện tại là **mặc định tạm**.
 
 Điều notebook này **không** làm: **không chạy test trên tập test**. Test chỉ được chạy
 **một lần duy nhất** ở Phase 5; chọn ngưỡng đếm và chọn checkpoint đều lấy từ val. Tập
@@ -174,14 +177,14 @@ chứng minh điều gì.
 | `docs/NOTES.md` | **Ghi chép thực tế**: phiên bản thư viện, cấu trúc dataset, các bẫy đã kiểm chứng |
 | `docs/RESULTS.md` | Bảng kết quả mọi thí nghiệm (sẽ tạo ở Phase 6) |
 | `configs/data.yaml` | **Mọi tham số** của Phase 1–2: đường dẫn, ngưỡng quyết định, tham số EDA |
-| `configs/mmdet/` | Config MMDetection của đồ án (`cascade_convnext_t_floodnet.py`), kế thừa config gốc; `overfit20.py` cho phép thử 20 ảnh |
+| `configs/mmdet/` | Config MMDetection của đồ án (`cascade_convnext_t_floodnet.py`), kế thừa config gốc; `overfit20.py` cho phép thử 20 ảnh; `overfit20_hocvet.py` — chẩn đoán khi `[3.10]` chưa đạt (tắt tăng cường, LR ×10) |
 | `src/floodcount/data/` | `audit.py` (EDA), `mask_to_coco.py`, `resize.py`, `visualize.py`, `kiem_tra.py` (chốt chặn trước train), `overfit.py`, `photometric.py` |
 | `src/floodcount/models/` | `transforms.py` — transform tự viết đăng ký vào registry của mmdet |
 | `src/floodcount/eval/` | `coco_eval.py` (mAP), `count_eval.py` (MAE/RMSE đếm), `error_analysis.py` |
 | `src/floodcount/infer/` | `predict.py` (ảnh → box + số đếm), `tta_wbf.py` |
 | `scripts/` | Lệnh CLI mỏng gọi vào `src/`; `cai_moi_truong.py` — cài + vá môi trường Colab, dùng chung cho notebook 00 và 03 |
 | `notebooks/` | Notebook **mỏng** cho Colab — chỉ gọi script, không chứa logic |
-| `tests/` | **453 phép kiểm** trong 8 bộ test, chạy trên máy CPU — không cần GPU, không cần dataset thật (dùng zip giả có cả bẫy ColorMasks). `test_train.py` kiểm được cả trên máy **chưa cài MMDetection**, vì `scripts/train.py` chỉ import mmdet/mmengine bên trong hàm (và khoá luôn thứ tự build `optim_wrapper` của vòng đo `--dry-run` — lỗi thật đã gặp, §3.8 NOTES); `test_cai_moi_truong.py` khoá cách dò wheel `mmcv` và ba miếng vá môi trường |
+| `tests/` | **464 phép kiểm** trong 8 bộ test, chạy trên máy CPU — không cần GPU, không cần dataset thật (dùng zip giả có cả bẫy ColorMasks). `test_train.py` kiểm được cả trên máy **chưa cài MMDetection**, vì `scripts/train.py` chỉ import mmdet/mmengine bên trong hàm (và khoá luôn thứ tự build `optim_wrapper` của vòng đo `--dry-run` — lỗi thật đã gặp, §3.8 NOTES); `test_cai_moi_truong.py` khoá cách dò wheel `mmcv` và ba miếng vá môi trường |
 | `outputs/` | Ảnh minh hoạ, overlay, biểu đồ (không đưa lên git) |
 | `requirements-colab.txt` | Bản ghi các gói cài thêm vào Colab (đọc phần đầu file trước khi dùng) |
 

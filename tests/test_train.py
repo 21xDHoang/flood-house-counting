@@ -6,7 +6,7 @@ là ràng buộc thiết kế có chủ ý: nhờ nó mà phần logic thuần P
 được ngay trên máy Windows không cài MMDetection, thay vì phải chờ tới lúc chạy
 trên Colab mới biết sai.
 
-Sáu thứ test này phải khoá:
+Bảy thứ test này phải khoá:
 
   1. `cac_ann_can_co` trả về ĐÚNG các tệp annotation mà config dùng. Sai chỗ này
      thì tiền kiểm đi kiểm nhầm tệp — tệ nhất là báo "ĐẠT HẾT" trong khi tệp
@@ -37,6 +37,12 @@ Sáu thứ test này phải khoá:
      kép, giá trị chuỗi thành ra chứa cả ngoặc, phép tra cứu trượt và đường dẫn
      hoá thành tên rác — im lặng hoàn toàn (lỗi thật ở lần chạy [3.10],
      docs/NOTES.md §3.11).
+
+  7. Config CHẨN ĐOÁN (`overfit20_hocvet.py`) phải giữ đúng hai dòng ghi đè làm
+     nên giá trị của nó — pipeline train không còn phép tăng cường nào (trùng
+     khớp Resize với lúc đánh giá) và LR ×10 — cùng một `work_dir` khác hẳn thư
+     mục của [3.10]. "Dọn dẹp" config này rồi chạy nhầm một lần khác là cách
+     duy nhất để cả phép chẩn đoán mất giá trị mà không ai biết (§3.12).
 
 Chạy:
     py tests/test_train.py
@@ -369,6 +375,93 @@ def main():
                  f"train/val/val_evaluator tro CUNG mot tep {dich!r} (tinh tu "
                  f"data_root cua config cha), thuc te {ann_train!r}, "
                  f"{ann_val!r}, {ann_ev!r}")
+
+        print("\n=== 5b. Config chan doan overfit20_hocvet (chay khi [3.10] chua dat) ===")
+        # Tep nay ton tai chi de tra loi MOT cau hoi: khi [3.10] chay het 60 epoch
+        # ma mAP chi dung o 0,618 (docs/NOTES.md §3.12), loi nam o duong ong
+        # (nhan/box/loss/eval) hay o recipe (LR/tang cuong)? Cach tra loi: chay
+        # LAI dung phep thu hoc vet nhung voi dieu kien de nhat. Toan bo gia tri
+        # cua lan chay nam o hai dong ghi de — tat tang cuong va LR x10 — nen
+        # chung phai duoc khoa lai: "don dep" config roi chay nham mot lan khac
+        # thi phep chan doan mat gia tri ma khong co gi bao.
+        duong_hv = os.path.join(str(GOC_REPO), "configs", "mmdet",
+                                "overfit20_hocvet.py")
+        kiem(os.path.exists(duong_hv),
+             f"co {os.path.relpath(duong_hv, str(GOC_REPO))}")
+
+        # Ke thua dung overfit20.py: du lieu (ann_file, data_prefix) va cong cu
+        # do (val_dataloader, checkpoint, visualization) nam o tep do, da khoa o
+        # muc 5 — tep chan doan chi duoc phep ghi de pipeline va LR.
+        base_hv = _doc_bien(duong_hv, "_base_")
+        kiem(base_hv == ["./overfit20.py"],
+             f"ke thua dung overfit20.py, thuc te {base_hv!r}")
+
+        # val_dataloader KHONG duoc ghi de: giu y nguyen phep do cua [3.10] thi
+        # con so moi (0,6x) moi so truc tiep duoc voi con so cu.
+        kiem(_doc_dataset(duong_hv, "val_dataloader") is None,
+             "khong ghi de val_dataloader (phep do phai y het [3.10])")
+
+        ds_hv = _doc_dataset(duong_hv, "train_dataloader")
+        pipe_hv = ds_hv.get("pipeline") if isinstance(ds_hv, dict) else None
+        ten_tf = ([tf.get("type") for tf in pipe_hv]
+                  if isinstance(pipe_hv, list) else None)
+        kiem(ten_tf == ["LoadImageFromFile", "LoadAnnotations", "Resize",
+                        "PackDetInputs"],
+             f"pipeline train chi con 4 buoc, KHONG con tang cuong nao (nhat la "
+             f"khong con RandomFlip/RandomChoiceResize/TangSangNhe), thuc te "
+             f"{ten_tf!r}")
+
+        # Resize cua pipeline train phai TRUNG KHOP voi Resize cua test_pipeline
+        # o config chinh — do moi la y nghia cua "train nhin anh y het luc danh
+        # gia". Lech ti le thi lan chay van chay, chi la khong con la phep thu
+        # don bien nua.
+        def _resize_dau(pipe):
+            return next((tf for tf in (pipe if isinstance(pipe, list) else [])
+                         if isinstance(tf, dict)
+                         and "esize" in str(tf.get("type", ""))), None)
+
+        def _scale_va_ratio(tf):
+            return ({k: tf.get(k) for k in ("scale", "keep_ratio")}
+                    if isinstance(tf, dict) else None)
+
+        resize_hv = _scale_va_ratio(_resize_dau(pipe_hv))
+        resize_eval = _scale_va_ratio(
+            _resize_dau(_doc_bien(duong_chinh, "test_pipeline")))
+        kiem(resize_hv is not None and resize_hv == resize_eval,
+             f"Resize cua train trung khop Resize cua test_pipeline o config "
+             f"chinh, thuc te {resize_hv!r} vs {resize_eval!r}")
+
+        # LR x10 va mot moc giam LR muon — thay cho lich [40, 55]/60 epoch da
+        # bop 20 epoch cuoi xuong 1e-5 va 5 epoch cuoi xuong 1e-6.
+        opt_hv = _doc_bien(duong_hv, "optim_wrapper")
+        lr_hv = ((opt_hv.get("optimizer") or {}).get("lr")
+                 if isinstance(opt_hv, dict) else None)
+        kiem(lr_hv == 0.001, f"LR = 1e-3 (x10 so voi 1e-4), thuc te {lr_hv!r}")
+
+        sch_hv = _doc_bien(duong_hv, "param_scheduler")
+        moc_hv = None
+        for sch in (sch_hv if isinstance(sch_hv, list) else []):
+            if isinstance(sch, dict) and sch.get("type") == "MultiStepLR":
+                moc_hv = sch.get("milestones")
+        so_epoch_hv = _doc_bien(duong_hv, "max_epochs")
+        kiem(moc_hv == [30] and so_epoch_hv == 40,
+             f"lich: MOT moc giam LR [30] tren 40 epoch (moc cuoi phai nam trong "
+             f"pham vi), thuc te moc {moc_hv!r} tren {so_epoch_hv!r} epoch")
+
+        # classwise=True: log lan nay in AP theo TUNG LOP — de phan biet "mot lop
+        # hong" voi "hoc chung chung khong len".
+        ev_hv = _doc_bien(duong_hv, "val_evaluator")
+        kiem(isinstance(ev_hv, dict) and ev_hv.get("classwise") is True,
+             f"val_evaluator bat classwise de in AP tung lop, thuc te {ev_hv!r}")
+
+        # work_dir phai KHAC cua [3.10]. Lan thi chu: chay vao dung thu muc cu
+        # thi `resume=True` (mac dinh) chay tiep tu checkpoint cu — xong 40
+        # epoch ma khong ai biet ket qua la cua lich moi hay lich cu.
+        wd_hv = _doc_bien(duong_hv, "work_dir")
+        wd_of = _doc_bien(duong_overfit, "work_dir")
+        kiem(isinstance(wd_hv, str) and isinstance(wd_of, str)
+             and wd_hv != wd_of,
+             f"work_dir rieng, khac cua [3.10] ({wd_of!r}), thuc te {wd_hv!r}")
 
         print("\n=== 6. data_prefix: anh cua tap overfit nam o images/train ===")
         # Loi that, tim ra bang cach doc source mmdet 3.3.0:
