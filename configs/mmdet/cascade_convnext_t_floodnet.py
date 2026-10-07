@@ -62,19 +62,18 @@ data_root = '/content/floodnet_coco'
 # đường dẫn này qua `--work-dir` khi chạy thí nghiệm khác (E2, E3...).
 work_dir = '/content/drive/MyDrive/Flood_House_AI/runs/train/e1_cascade_convnext_t'
 
-# --- Đường dẫn ĐẦY ĐỦ của các tệp annotation, khai báo một chỗ -------------
-# Vì sao phải đặt tên thay vì viết thẳng: configs/mmdet/overfit20.py kế thừa
-# config này và phải trỏ `val_evaluator` sang tệp instances_overfit20.json.
-# mmengine KHÔNG đưa biến của config cha vào phạm vi của config con — đã đọc
-# source (`_file2dict`): tệp con được exec trong namespace chỉ có ĐÚNG MỘT tên
-# là `_base_`. Muốn dùng lại biến của cha thì phải qua cú pháp `_base_` đặt
-# trong hai cặp ngoặc nhọn, mà cú pháp đó chỉ thay được khi **cả chuỗi** đúng
-# bằng cú pháp đó — không ghép thêm chữ được (ghép vào là ra một chuỗi rác và
-# không có lỗi nào báo). Vì vậy tính sẵn đường dẫn đầy đủ ở đây, config con chỉ
-# việc lấy.
+# --- Đường dẫn ĐẦY ĐỦ của hai tệp annotation cho evaluator, khai một chỗ ----
+# Evaluator (CocoMetric) mở thẳng tệp bằng pycocotools, KHÔNG biết `data_root`
+# là gì, nên hai chỗ dùng nó phải nhận đường dẫn tuyệt đối — đặt tên ở đây để
+# gốc đường dẫn chỉ có một chỗ chứa.
+#
+# KHÔNG có `ann_overfit` ở đây: config con (overfit20.py) không với tới được
+# biến của config cha (tệp con chỉ thấy đúng một tên `_base_`), và cú pháp
+# hai-ngoặc-nhọn — cách duy nhất để với tới — đã thử và hỏng IM LẶNG với giá
+# trị chuỗi. Config con vì thế tự viết đường dẫn của nó; xem docs/NOTES.md
+# §3.11 và chú thích đầu configs/mmdet/overfit20.py.
 ann_val = data_root + '/annotations/instances_val.json'
 ann_test = data_root + '/annotations/instances_test.json'
-ann_overfit = data_root + '/annotations/instances_overfit20.json'
 
 # ===========================================================================
 # 2. HAI LỚP CỦA ĐỒ ÁN

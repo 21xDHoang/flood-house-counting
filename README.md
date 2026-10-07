@@ -28,7 +28,7 @@ Số liệu và phát hiện đã kiểm chứng thật: [`docs/NOTES.md`](docs/
 | 0 | Khởi tạo repo + kiểm tra môi trường Colab | ✅ **GATE 0 đạt** — chạy thật trên Colab T4, đã kiểm chứng đủ (`docs/NOTES.md` §1.5–§1.6) |
 | 1 | Khám phá dữ liệu (EDA) & quyết định tiền xử lý | ✅ **GATE 1 đạt (30/09/2026)** — 4 tham số đã chốt (`docs/NOTES.md` §2.5) |
 | 2 | Chuyển mask → COCO & tiền xử lý offline | ✅ **GATE 2 đạt (30/09/2026)** — 2.343 ảnh, 6.301 box, đối chiếu Phase 1 khớp hoàn toàn (`docs/NOTES.md` §2.7) |
-| 3 | Cấu hình model & sanity check (overfit 20 ảnh) | 🟡 **Code xong (30/09/2026)** — chưa chạy trên Colab, xem `docs/NOTES.md` §3 |
+| 3 | Cấu hình model & sanity check (overfit 20 ảnh) | 🟡 **GATE 3 đang chạy trên Colab (01/10/2026)** — `[3.6]`–`[3.9]` xong (số đo `--dry-run`: 866,3 ms/vòng, 10,4 phút/epoch, VRAM 7,81/14,56 GB); `[3.10]` lần đầu hỏng vì cú pháp `{{_base_.}}` hỏng im lặng, đã sửa — chờ chạy lại. Xem `docs/NOTES.md` §3.9 và §3.11 |
 | 4 | Huấn luyện baseline (E1) | ⏳ |
 | 5 | Đánh giá mAP + sai số đếm & phân tích lỗi | ⏳ |
 | 6 | Thí nghiệm cải thiện & ablation (E2–E7) | ⏳ |

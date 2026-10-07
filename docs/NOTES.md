@@ -938,12 +938,12 @@ Muốn giữ nhiều checkpoint hơn thì sửa `max_keep_ckpts` ở mục 8 c�
 | `test_mask_to_coco.py` | 106 |
 | `test_audit.py` | 103 |
 | `test_cai_moi_truong.py` | 59 |
-| `test_train.py` | 47 |
+| `test_train.py` | **49** (47 trước §3.11) |
 | `test_kiem_tra.py` | 41 |
 | `test_anchor.py` | 39 |
 | `test_overfit.py` | 37 |
 | `test_photometric.py` | 21 |
-| **Tổng** | **453** |
+| **Tổng** | **455** |
 
 Cả 8 bộ **PASS** ngày 01/10/2026. `test_train.py` chạy được cả trên máy sạch
 chưa cài MMDetection vì `scripts/train.py` chỉ import mmdet/mmengine **bên trong
@@ -1003,6 +1003,11 @@ Nhân tiện đối chiếu luôn cú pháp `{{_base_.ann_overfit}}` với sourc
 `r'\{\{\s*_base_\.([\w\.]+)\s*\}\}'`, và việc thay thế chỉ xảy ra khi **toàn bộ**
 chuỗi khớp — xác nhận chú thích trong `overfit20.py` là đúng, không phải suy đoán.
 
+> **Sửa lại (01/10/2026, xem §3.11):** kết luận ngay trên là SAI. Phép đối chiếu
+> mới chỉ kiểm regex và điều kiện khớp toàn chuỗi, chưa kiểm một chi tiết:
+> placeholder mmengine sinh ra **đã bọc sẵn ngoặc kép**. Với giá trị chuỗi, cú
+> pháp đó hỏng **im lặng** — và lần chạy `[3.10]` đã chết vì nó.
+
 **Chốt chặn thêm, để lỗi này không tái phát ở config khác.** Sửa đúng một chỗ
 `data_prefix` thì chỉ chặn được đúng ca đã gặp. Nên `scripts/train.py` có thêm
 **mục [2b]** trong phần tiền kiểm: mở từng annotation, ghép
@@ -1021,9 +1026,11 @@ GATE 3 đang chạy trên Colab (01/10/2026). Đã báo cáo về: `[3.6]`
 `kiem_tra_du_lieu` (ĐẠT HẾT), `[3.7]` `kiem_anchor` (ĐẠT — số đo ở §3.3),
 `[3.8]` dựng tập overfit (20 ảnh / 125 box, seed 42, script tự đọc lại từ đĩa
 xác nhận khớp). `[3.9]` `train.py --dry-run`: lần đầu hỏng (§3.8), lần hai xong
-— số đo ở §3.9. Còn lại: `[3.10]` train overfit 20 ảnh, **dừng và báo cáo lại**.
-Train thật (Phase 4) chỉ bắt đầu sau khi chốt số epoch từ phép đo `--dry-run`
-(ước lượng thô hiện có: 24 epoch ≈ 4,2 giờ phần train).
+— số đo ở §3.9. `[3.10]` train overfit 20 ảnh: lần đầu **hỏng** — cú pháp
+`{{_base_.ann_overfit}}` hoá thành đường dẫn rác mà không lỗi nào báo (§3.11);
+đã sửa và khoá bằng test, chờ chạy lại. Train thật (Phase 4) chỉ bắt đầu sau khi
+chốt số epoch từ phép đo `--dry-run` (ước lượng thô hiện có: 24 epoch ≈ 4,2 giờ
+phần train).
 
 ### 3.8 Lỗi thật đầu tiên trên Colab: `optim_wrapper` chưa được build (01/10/2026)
 
@@ -1118,6 +1125,62 @@ resume "khởi động lại" quán tính — chấp nhận được, không đ�
 ghi thêm ~600 MB optimizer lên Drive mỗi epoch). Muốn train lại từ đầu: xoá
 `runs/train/e1_cascade_convnext_t` trên Drive.
 
+### 3.11 Lỗi thật thứ hai trên Colab: `{{_base_.ann_overfit}}` hỏng IM LẶNG (01/10/2026)
+
+Ô `[3.10]` (train overfit 20 ảnh) dừng ở tiền kiểm: "đường dẫn" annotation nó
+nhận được không phải đường dẫn mà là một chuỗi rác dạng `"_ann_overfit_d1b839"`
+(có cả ngoặc kép bên trong giá trị). mmengine không ném lỗi nào ở bất kỳ bước
+nào — họ "thất bại im lặng" lần thứ ba của đồ án (§2.6, §3.6, và đây).
+
+**Cơ chế** (đọc source mmengine 0.10.7, `_pre_substitute_base_vars`).
+`overfit20.py` viết `ann_file='{{_base_.ann_overfit}}'` trong ngoặc kép. Hàm
+thay thế dùng `re.sub(regexp, f'"{randstr}"', ...)` — placeholder **đã bọc sẵn
+ngoặc kép**. Giá trị chuỗi vì thế thành `'"_ann_overfit_d1b839"'`, tức mang luôn
+hai dấu ngoặc kép. Bước tra cứu sau đó so `v in base_var_dict` với `v` đang có
+ngoặc kép → **trượt**, và mmengine **không kiểm tra tra cứu trượt**; giá trị rác
+đi thẳng vào config rồi vào tiền kiểm.
+
+Dạng **trần** (không ngoặc kép) thì chạy được theo source — nhưng như §3.6 đã
+nêu, việc thay thế chỉ xảy ra khi **toàn bộ** chuỗi đúng bằng cú pháp đó, mà ở
+đây cần một giá trị chuỗi nằm trong `dict(...)`.
+
+**Điều §3.6 kết luận sai, và vì sao.** §3.6 đã đối chiếu source rồi kết luận cú
+pháp này "đúng, không phải suy đoán" — nhưng phép đối chiếu đó **chỉ kiểm regex
+và điều kiện khớp toàn chuỗi**, không kiểm placeholder có bọc ngoặc kép hay
+không, và không hề chạy thử. Đọc source đúng vẫn có thể kết luận sai nếu bỏ sót
+một dòng. Đây là lý do §3.5/§3.6 đặt nguyên tắc: kết luận từ source chỉ là giả
+thuyết cho tới khi có lần chạy thật xác nhận.
+
+**Sửa:** bỏ hẳn cơ chế lấy biến từ config cha, config con tự viết đường dẫn.
+
+- `configs/mmdet/overfit20.py` — `train_dataloader`/`val_dataloader` ghi
+  `ann_file` **TƯƠNG ĐỐI** (`annotations/instances_overfit20.json`; mmdet tự ghép
+  với `data_root` thừa hưởng từ config cha), `val_evaluator` ghi **TUYỆT ĐỐI** —
+  CocoMetric mở thẳng tệp bằng pycocotools, không biết `data_root` là gì. Hai
+  dạng khác nhau là **cố ý**, đúng theo cách config cha đang làm.
+- `configs/mmdet/cascade_convnext_t_floodnet.py` — xoá biến `ann_overfit` (không
+  còn ai dùng).
+
+**Khoá lại bằng test** (`tests/test_train.py` mục 5, đọc config bằng `ast`, không
+cần mmengine) — ba phép kiểm mới:
+
+1. **Cấm** cú pháp `{{_base_.` trong **mọi** tệp `.py` của `configs/` (bỏ qua
+   dòng comment — chính chú thích giải thích vì sao cấm thì được phép nhắc tới
+   nó). Cấm ở mức cả thư mục chứ không riêng `overfit20.py`, để config thí nghiệm
+   sau này (E2–E7) không lặp lại.
+2. Ba đường dẫn train / val / `val_evaluator` phải trỏ về **cùng một tệp**, và
+   tệp đó phải khớp `data_root` của config cha (ghép bằng `posixpath` — Colab
+   chạy Linux còn máy này Windows, `os.path.join` sẽ ra `\` và so sánh sai).
+3. Hai giá trị đọc ra phải là **chuỗi thật** trước khi so sánh: hai `_BieuThuc`
+   luôn bằng nhau (`__eq__` cố ý như vậy), so sánh thẳng là tự cho mình ĐẠT.
+
+**Số phép kiểm:** 455 (§3.5). Cả 8 bộ PASS trên máy ngày 01/10/2026.
+
+**Bài học:** cú pháp "tiện" của mmengine chỉ tiện khi **toàn bộ** chuỗi là cú
+pháp đó. Đã dùng tới nó thì phải có một phép kiểm chạm vào giá trị thật sau khi
+mmengine xử lý xong — không phép kiểm nào trong repo này làm được điều đó nếu
+không chạy thật, nên cách rẻ nhất là **đừng dùng**.
+
 ---
 
 ## 4. Việc tiếp theo
@@ -1173,10 +1236,15 @@ ghi thêm ~600 MB optimizer lên Drive mỗi epoch). Muốn train lại từ đ�
      **§3.6**.
    - **Lỗi thật đầu tiên trên Colab (ô `[3.9]`)**: vòng đo `--dry-run` quên build
      `optim_wrapper` — mmengine chỉ build nó trong `Runner.train()`. Đã sửa, khoá bằng
-     4 phép kiểm AST (đã kiểm âm). Số phép kiểm: **453** (§3.5). Chi tiết ở **§3.8**.
-6. **Bước kế tiếp ngay: chạy `notebooks/03_train.ipynb` trên Colab T4 (Phase 3) — MỘT tab.**
-   Ô `[3.3b]` tự cài môi trường (gọi `scripts/cai_moi_truong.py`, §1.9) nên **không phải mở
-   notebook 00 ở tab thứ hai**. Thứ tự các ô và thời gian dự kiến ghi trong README. Dừng ở
-   phép thử overfit 20 ảnh và báo cáo lại (số epoch, loss, thời gian một epoch đo được ở ô
-   `--dry-run`) trước khi sang Phase 4.
+     4 phép kiểm AST (đã kiểm âm). Số phép kiểm: **455** (§3.5). Chi tiết ở **§3.8**.
+   - **Lỗi thật thứ hai trên Colab (ô `[3.10]`)**: cú pháp `{{_base_.ann_overfit}}`
+     trong config con hoá thành đường dẫn rác, **không lỗi nào báo**. Đã bỏ hẳn cú pháp
+     đó khỏi repo (config con tự viết đường dẫn) và cấm nó bằng test ở mức cả thư mục
+     `configs/`. Chi tiết ở **§3.11**.
+6. **Bước kế tiếp ngay: chạy LẠI ô `[3.10]` của `notebooks/03_train.ipynb` trên Colab T4.**
+   Phải **push bản sửa §3.11 lên GitHub trước** — Colab clone code từ GitHub, chưa push là
+   Colab chạy lại đúng bản cũ và hỏng y hệt. Ô `[3.3b]` tự cài môi trường (gọi
+   `scripts/cai_moi_truong.py`, §1.9) nên **không phải mở notebook 00 ở tab thứ hai**.
+   Dừng ở phép thử overfit 20 ảnh và báo cáo lại (số epoch, loss, mAP tiến gần 1.0 không)
+   trước khi sang Phase 4.
    Không đụng tới `floodnet_raw.zip` 13 GB nữa — chỉ cần `floodnet_coco.zip` 1,86 GB.

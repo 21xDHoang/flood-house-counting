@@ -26,14 +26,25 @@ _base_ = ['./cascade_convnext_t_floodnet.py']
 # KHÔNG copy 20 ảnh sang chỗ khác — copy ra là lại phải quản lý thêm một bản sao
 # có thể lệch với bản gốc.
 #
-# Đường dẫn lấy từ config cha bằng cú pháp `_base_` đặt trong hai cặp ngoặc
-# nhọn (xem ba chỗ `ann_file=` bên dưới). Bắt buộc phải viết đúng dạng đó,
-# KHÔNG được viết `data_root + '/' + ...`: mmengine exec tệp config con trong
-# một namespace chỉ có đúng một tên là `_base_`, nên `data_root` ở đây là biến
-# không tồn tại (NameError). Còn cú pháp hai-ngoặc-nhọn hoạt động bằng cách
-# thay **cả chuỗi** bằng một token rồi tra ngược lại giá trị trong config cha —
-# nên nó chỉ dùng được khi toàn bộ giá trị đúng bằng cú pháp đó, không ghép
-# thêm ký tự nào (ghép vào là ra chuỗi rác mà không có lỗi nào báo).
+# Vì sao đường dẫn viết THẲNG ở đây, không lấy từ biến của config cha:
+# mmengine exec tệp config con trong một namespace chỉ có ĐÚNG MỘT tên là
+# `_base_`, nên `data_root` ở đây là biến không tồn tại (NameError). Cách duy
+# nhất để với tới biến của cha là cú pháp hai-ngoặc-nhọn — đã thử và HỎNG, và
+# hỏng IM LẶNG: viết `'{{_base_.ann_overfit}}'` trong ngoặc kép thì mmengine
+# thay phần trong ngoặc bằng một placeholder đã bọc sẵn ngoặc kép, giá trị
+# chuỗi thành ra chứa cả ngoặc, phép tra cứu trượt, và đường dẫn hoá thành tên
+# rác `"_ann_overfit_xxxxxx"` mà không có lỗi nào báo. Đã kiểm bằng source
+# mmengine 0.10.7 và bằng lần chạy [3.10] ngày 01/10/2026 — chi tiết ở
+# docs/NOTES.md §3.11.
+#
+# Hai dạng đường dẫn dưới đây cố ý KHÁC nhau, theo đúng cách config cha làm:
+#   * dataloader — TƯƠNG ĐỐI: mmdet ghép với `data_root` thừa hưởng từ config
+#     cha (`/content/floodnet_coco`), nên gốc đường dẫn không chép lại ở đây.
+#   * val_evaluator — TUYỆT ĐỐI: CocoMetric mở thẳng tệp bằng pycocotools,
+#     không biết `data_root` là gì (config cha cũng vì thế mà dùng `ann_val`
+#     tuyệt đối).
+# tests/test_train.py mục 5 khoá ba đường dẫn phải trỏ về CÙNG một tệp, và tệp
+# đó phải khớp `data_root` của config cha.
 
 # ---------------------------------------------------------------------------
 # Dữ liệu: cả train và val đều trỏ vào 20 ảnh đó
@@ -55,18 +66,25 @@ train_dataloader = dict(
     # optim_wrapper bên dưới): 20 ảnh / batch 2 = 10 vòng lặp mỗi epoch, cần
     # nhiều bước cập nhật thì mới hội tụ kịp trong thời gian chấp nhận được.
     dataset=dict(
-        ann_file='{{_base_.ann_overfit}}',
+        # TƯƠNG ĐỐI — mmdet ghép với `data_root` thừa hưởng từ config cha.
+        ann_file='annotations/instances_overfit20.json',
         data_prefix=dict(img='images/train/')))
 
 val_dataloader = dict(
     dataset=dict(
-        ann_file='{{_base_.ann_overfit}}',
+        # TƯƠNG ĐỐI, cùng tệp với train — phép thử này ĐÁNH GIÁ TRÊN CHÍNH 20
+        # ảnh đã train (xem chú thích đầu tệp).
+        ann_file='annotations/instances_overfit20.json',
         data_prefix=dict(img='images/train/')))
 
 # Đánh giá trên chính tập vừa train — đây là điểm mấu chốt của phép kiểm này.
 # Lưu ý: chỉ dùng để chẩn đoán, TUYỆT ĐỐI không trích dẫn con số mAP này vào
 # báo cáo như một kết quả của đồ án (nó là điểm trên tập train).
-val_evaluator = dict(ann_file='{{_base_.ann_overfit}}')
+val_evaluator = dict(
+    # TUYỆT ĐỐI — CocoMetric mở thẳng tệp bằng pycocotools, không biết
+    # `data_root` là gì. Đổi `data_root` ở config cha thì phải đổi cả dòng này
+    # (tests/test_train.py mục 5 sẽ đỏ nếu quên).
+    ann_file='/content/floodnet_coco/annotations/instances_overfit20.json')
 
 # ---------------------------------------------------------------------------
 # Lịch train

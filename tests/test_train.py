@@ -6,7 +6,7 @@ là ràng buộc thiết kế có chủ ý: nhờ nó mà phần logic thuần P
 được ngay trên máy Windows không cài MMDetection, thay vì phải chờ tới lúc chạy
 trên Colab mới biết sai.
 
-Năm thứ test này phải khoá:
+Sáu thứ test này phải khoá:
 
   1. `cac_ann_can_co` trả về ĐÚNG các tệp annotation mà config dùng. Sai chỗ này
      thì tiền kiểm đi kiểm nhầm tệp — tệ nhất là báo "ĐẠT HẾT" trong khi tệp
@@ -30,6 +30,14 @@ Năm thứ test này phải khoá:
      `runner.optim_wrapper` vẫn là ConfigDict và `train_step` nổ ngay vòng đầu —
      lỗi thật đã gặp trên Colab ở GATE 3, sau khi đã dựng xong model.
 
+  6. Config con (`overfit20.py`) phải tự viết đường dẫn annotation của nó, và cả
+     ba đường dẫn train/val/val_evaluator phải trỏ về CÙNG một tệp khớp
+     `data_root` của config cha. Cú pháp `{{_base_.xxx}}` bị CẤM trong configs/:
+     viết trong ngoặc kép thì mmengine thay bằng một placeholder đã bọc sẵn ngoặc
+     kép, giá trị chuỗi thành ra chứa cả ngoặc, phép tra cứu trượt và đường dẫn
+     hoá thành tên rác — im lặng hoàn toàn (lỗi thật ở lần chạy [3.10],
+     docs/NOTES.md §3.11).
+
 Chạy:
     py tests/test_train.py
 """
@@ -39,6 +47,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import posixpath
 import re
 import sys
 import tempfile
@@ -295,17 +304,71 @@ def main():
         print("\n=== 5. Config overfit20 tro dung tep do tao_overfit20 sinh ra ===")
         # Hai script phai thong nhat ten tep, neu khong thi GATE 3 chay vao mot
         # tep khong ton tai (hoac tep cu con sot lai cua lan chay truoc).
-        ma_cfg = open(os.path.join(str(GOC_REPO), "configs", "mmdet", "overfit20.py"),
-                      encoding="utf-8").read()
+        duong_overfit = os.path.join(str(GOC_REPO), "configs", "mmdet", "overfit20.py")
+        duong_chinh = os.path.join(str(GOC_REPO), "configs", "mmdet",
+                                   "cascade_convnext_t_floodnet.py")
+        ma_cfg = open(duong_overfit, encoding="utf-8").read()
         kiem("instances_overfit20.json" in ma_cfg,
-             "config overfit20 tro tới instances_overfit20.json")
+             "config overfit20 tro toi instances_overfit20.json")
         ma_tao = open(os.path.join(str(GOC_REPO), "src", "floodcount", "data",
                                    "overfit.py"), encoding="utf-8").read()
         kiem("instances_overfit20.json" in ma_tao,
              "tao_overfit20.py ghi ra dung cai ten do")
-        kiem("{{_base_.ann_overfit}}" in ma_cfg,
-             "config overfit20 lay duong dan tu config cha bang cu phap "
-             "{{_base_.}}, khong tu ghep chuoi")
+
+        # Cu phap {{_base_.xxx}} BI CAM trong moi config. Lan chay [3.10] ngay
+        # 01/10/2026 tren Colab: config viet ann_file='{{_base_.ann_overfit}}',
+        # mmengine 0.10.7 thay phan trong ngoac bang mot placeholder da BOC SAN
+        # ngoac kep (`_pre_substitute_base_vars`: re.sub(regexp, f'"{randstr}"',
+        # ...)), nen gia tri chuoi thanh '"_ann_overfit_d1b839"' — tra
+        # `v in base_var_dict` truot (khoa khong co ngoac), the la duong dan rac
+        # di thang vao tien kiem, KHONG loi nao bao. Dang TRAN (khong ngoac) thi
+        # chay duoc theo source, nhung khi do config khong con la chuoi cho chinh
+        # test nay doc bang ast. Chi tiet: docs/NOTES.md §3.11.
+        vi_pham = []
+        for goc, _, ten_tep in os.walk(os.path.join(str(GOC_REPO), "configs")):
+            for ten in ten_tep:
+                if ten.endswith(".py"):
+                    duong = os.path.join(goc, ten)
+                    with open(duong, encoding="utf-8") as f:
+                        # Bo dong comment TRUOC khi tim: chinh chu thich dau
+                        # overfit20.py nhac lai cu phap nay de giai thich vi sao
+                        # no bi cam — do la tai lieu, khong phai code.
+                        if any("{{_base_." in d
+                               for d in f.read().splitlines()
+                               if not d.lstrip().startswith("#")):
+                            vi_pham.append(os.path.relpath(duong, str(GOC_REPO)))
+        kiem(not vi_pham,
+             "khong config nao dung cu phap {{_base_.}} (hong im lang voi gia "
+             f"tri chuoi — NOTES §3.11), thuc te {vi_pham}")
+
+        # Ba duong dan annotation phai tro ve CUNG mot tep, va tep do phai khop
+        # `data_root` cua config cha. Dataloader ghi TUONG DOI (mmdet ghep voi
+        # data_root thua huong tu config cha), con val_evaluator ghi TUYET DOI
+        # (CocoMetric mo thang tep bang pycocotools, khong biet data_root).
+        data_root_cha = _doc_bien(duong_chinh, "data_root")
+        ds_train = _doc_dataset(duong_overfit, "train_dataloader")
+        ds_val = _doc_dataset(duong_overfit, "val_dataloader")
+        ev_val = _doc_bien(duong_overfit, "val_evaluator")
+        ann_train = ds_train.get("ann_file") if isinstance(ds_train, dict) else None
+        ann_val = ds_val.get("ann_file") if isinstance(ds_val, dict) else None
+        ann_ev = ev_val.get("ann_file") if isinstance(ev_val, dict) else None
+        # `isinstance(..., str)` TRUOC khi so sanh: hai `_BieuThuc` luon bang
+        # nhau (__eq__ co y nhu vay), so sanh thang la tu cho minh DAT.
+        doc_duoc = all(isinstance(x, str)
+                       for x in (data_root_cha, ann_train, ann_val, ann_ev))
+        kiem(doc_duoc,
+             f"doc duoc data_root cua config cha va ba ann_file cua config "
+             f"overfit, thuc te {data_root_cha!r}, {ann_train!r}, "
+             f"{ann_val!r}, {ann_ev!r}")
+        if doc_duoc:
+            # posixpath chu khong os.path: Colab chay Linux, con may nay Windows
+            # — os.path.join se tra ve '\' va so sanh sai.
+            dich = posixpath.join(data_root_cha, ann_train)
+            kiem(posixpath.join(data_root_cha, ann_val) == dich
+                 and ann_ev == dich,
+                 f"train/val/val_evaluator tro CUNG mot tep {dich!r} (tinh tu "
+                 f"data_root cua config cha), thuc te {ann_train!r}, "
+                 f"{ann_val!r}, {ann_ev!r}")
 
         print("\n=== 6. data_prefix: anh cua tap overfit nam o images/train ===")
         # Loi that, tim ra bang cach doc source mmdet 3.3.0:
@@ -324,7 +387,6 @@ def main():
         #
         # Luat khoa lai: dataset nao tro tới annotation overfit thi phai khai
         # TUONG MINH data_prefix, khong duoc de thua huong.
-        duong_overfit = os.path.join(str(GOC_REPO), "configs", "mmdet", "overfit20.py")
         for vai in ("train", "val", "test"):
             ds = _doc_dataset(duong_overfit, f"{vai}_dataloader")
             if ds is None:
@@ -346,8 +408,6 @@ def main():
 
         # Cung phep kiem cho config chinh: moi split phai tro dung thu muc anh cua
         # no. Neu ai do chep kieu khai bao cua overfit20 vao day thi test do ngay.
-        duong_chinh = os.path.join(str(GOC_REPO), "configs", "mmdet",
-                                   "cascade_convnext_t_floodnet.py")
         for vai in ("train", "val", "test"):
             ds = _doc_dataset(duong_chinh, f"{vai}_dataloader")
             kiem(isinstance(ds, dict),
@@ -370,10 +430,8 @@ def main():
         # thich (chinh comment ngay tren `data_root` co nhac ten no).
         yaml_cfg = _doc_yaml(os.path.join(str(GOC_REPO), "configs", "data.yaml"))
         processed_dir = (yaml_cfg.get("paths") or {}).get("processed_dir")
-        duong_cfg = os.path.join(str(GOC_REPO), "configs", "mmdet",
-                                 "cascade_convnext_t_floodnet.py")
         ma_mmdet = "\n".join(
-            d for d in open(duong_cfg, encoding="utf-8").read().splitlines()
+            d for d in open(duong_chinh, encoding="utf-8").read().splitlines()
             if not d.lstrip().startswith("#"))
         # Chi bat phep GAN chuoi: `data_root = '/content/...'`. Cac dict dataset
         # dung `data_root=data_root` (khong co dau ngoac kep) nen khong khop —
@@ -511,6 +569,24 @@ def _gia_tri(node):
         return _BieuThuc(ast.unparse(node))
     except Exception:                            # noqa: BLE001
         return _BieuThuc("?")
+
+
+def _doc_bien(duong_config, ten_bien):
+    """Đọc literal gán cho một biến cấp module trong tệp config, KHÔNG cần mmengine.
+
+    Trả về giá trị literal (chuỗi/số/dict...), `_BieuThuc` nếu chỗ đó là biểu
+    thức đọc chữ không ra, và `None` nếu tệp không gán biến ấy. Dùng để đọc
+    `data_root` của config cha và `val_evaluator` của config con — hai thứ nằm
+    ngoài `dataset=` mà `_doc_dataset` với tới.
+    """
+    with open(duong_config, encoding="utf-8") as f:
+        cay = ast.parse(f.read())
+    for nut in cay.body:
+        if isinstance(nut, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == ten_bien
+                for t in nut.targets):
+            return _gia_tri(nut.value)
+    return None
 
 
 def _doc_dataset(duong_config, ten_bien):
