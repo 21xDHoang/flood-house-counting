@@ -1657,6 +1657,108 @@ chọn recipe cho train thật:
 
 ---
 
+### 3.16 E1 — train thật (1.445 ảnh): 60/60 epoch, best mAP 0,627 / mAP@50 0,816 (07/10/2026)
+
+Ô `[3.11]` chạy xong ngày 07/10/2026: **thoát 0, không NaN, đủ 60/60 epoch** — val
+có mặt ở cả 60 epoch, không epoch nào thiếu. Recipe đúng như đã chốt ở §4 mục 6:
+60 epoch, `base_lr` 1e-4, mốc LR `[40, 55]`, warmup 1.000 vòng, AMP + tích luỹ 4
+(batch hiệu dụng 8); train 1.445 ảnh (723 vòng/epoch), val 450 ảnh.
+
+**Chạy thành 3 đoạn, có 2 lần tự resume — cả hai đều sạch:**
+
+| Đoạn | Bắt đầu → kết thúc | Làm được gì | Dừng vì |
+|---|---|---|---|
+| `20261007_141146` | 14:11:46 → 14:30:49 (19 phút) | epoch 1–5 (val 1–5); dừng GIỮA epoch 6 (vòng 300/723) | phiên chạy dừng |
+| `20261007_143113` | 14:31:13 → 15:05:05 (34 phút) | **resume từ `epoch_5.pth`**; epoch 6–14 (val 6–14); dừng GIỮA epoch 15 (vòng 550/723) | phiên chạy dừng |
+| `20261007_150527` | 15:05:27 → 17:44:10 (2 giờ 39 phút) | **resume từ `epoch_14.pth`**; epoch 15–60 (val 15–60) | chạy hết |
+
+Bằng chứng nằm trong log chứ không phải suy đoán: `Auto resumed from the latest
+checkpoint .../epoch_5.pth` + `resumed epoch: 5, iter: 3615`, và `.../epoch_14.pth`
++ `resumed epoch: 14, iter: 10122`. Đoạn 1 → đoạn 2 cách nhau **24 giây**, đoạn 2 →
+đoạn 3 cách nhau **22 giây**. Đây là **lần đầu hai miếng vá resume chạy thật trên
+Colab**: §3.13 (vá `torch.load` — không có nó thì resume nổ ngay ở bước đọc
+checkpoint) và §3.14 (vá LR sau resume). `vis_data/config.py` của cả ba đoạn **giống
+nhau từng byte** (md5 `a18ee1cc…`) — hai lần resume chạy đúng cùng một config,
+không có chuyện đoạn sau lỡ đổi tham số.
+
+Ba điều đọc được từ log về resume:
+
+- **Mốc LR nổ đúng sau khi resume.** `base_lr` = 1e-4 tới hết epoch 40, **1e-5 từ
+  epoch 41**, **1e-6 từ epoch 56** — log chỉ in đúng ba mức đó, không lệch epoch
+  nào. Sổ đếm epoch của runner sống sót qua cả hai lần resume.
+- **Hai lần resume này KHÔNG kiểm chứng được miếng vá §3.14**: cả hai rơi vào vùng
+  LR phẳng 1e-4 (mốc `[40, 55]` còn xa), mà ở vùng phẳng thì LR đặt đúng hay sai
+  trông y hệt nhau. Miếng vá đó chỉ được kiểm chứng bằng harness Runner thật
+  (§3.14). Resume lần này sạch, nhưng đừng lấy nó làm bằng chứng cho §3.14.
+- mmengine cảnh báo `Resumed iteration number is not divisible by
+  _accumulative_counts` ở cả hai lần resume (điểm resume không chia hết cho 4 →
+  cửa sổ tích luỹ đầu tiên gộp thiếu vi-batch). Chạy tiếp trọn vẹn, không thấy hệ
+  quả nào; ghi lại vì đó là dấu vết khác của resume trong log.
+
+**Chi phí thật (A100 40 GB, đo bằng mốc thời gian trong log):** 154 s train +
+~30 s val + ~23 s ghi checkpoint = **~207 s/epoch (3,45 phút)** → 60 epoch ≈ 3,5
+giờ; cộng cả hai lần chạy lại thì tổng thời gian tường là 3 giờ 32 phút. Khớp ước
+tính ~3 giờ A100 ở §4 mục 6. So với số đo T4 ở §3.9 (866,3 ms/vòng): A100 chạy
+213 ms/vòng, **nhanh ~4 lần**.
+⚠️ Đừng lấy cột `time:` trong log mmengine để tính thời gian — lần này nó in
+~0,073 trong khi đo thật là 213 ms/vòng (154 s / 723 vòng).
+
+**Kết quả val (450 ảnh):**
+
+| Chỉ số | Tốt nhất — epoch 26 | epoch 37 (đồng hạng) | epoch 60 (cuối) |
+|---|---|---|---|
+| mAP (0,50:0,95) | **0,627** | 0,627 | 0,593 |
+| mAP@50 | **0,816** | 0,810 | 0,751 |
+| mAP@75 | 0,707 | 0,706 | 0,659 |
+| mAP vật nhỏ | 0,145 | 0,174 | 0,168 |
+| mAP vật vừa | 0,462 | 0,463 | 0,397 |
+| mAP vật lớn | 0,703 | 0,701 | 0,682 |
+
+`save_best='coco/bbox_mAP'` giữ lại tệp **`best_coco_bbox_mAP_epoch_26.pth`**.
+Epoch 37 đạt ĐÚNG 0,6270 như epoch 26 nhưng tệp best **không** bị ghi đè — mmengine
+chỉ thay tệp best khi điểm cao hơn hẳn, bằng điểm thì giữ bản cũ (quan sát từ chính
+lần chạy này, qua tên tệp còn lại). Nên bản đang có là epoch 26, và đó cũng là bản
+có mAP@50 cao nhất cả lần chạy (0,816 so với 0,810). Bản epoch 37 không còn:
+`max_keep_ckpts=2` chỉ giữ `epoch_59.pth` + `epoch_60.pth` + tệp best — đúng 3 tệp
+trong zip, ~313–320 MB mỗi tệp.
+
+**Đường cong đã CHỮNG từ lâu, không phải đang leo.** Trung bình theo từng chục epoch:
+
+| Epoch | 15–20 | 21–30 | 31–40 | 41–50 | 51–60 |
+|---|---|---|---|---|---|
+| TB mAP | 0,593 | 0,590 | 0,593 | 0,591 | **0,579** |
+| TB mAP@50 | 0,789 | 0,771 | 0,767 | 0,755 | 0,733 |
+
+Từ epoch 15 trở đi (epoch sớm nhất còn log val — hai đoạn đầu dừng trước khi kịp
+val) đường cong đứng yên trong khoảng 0,58–0,63, chênh giữa các chục epoch dưới
+0,015. **Hai mốc giảm LR (41 và 56) không mua được gì**: chục epoch cuối là chục
+thấp nhất bảng. Dao động thì lớn: 5 epoch tụt sâu (23: 0,480; 40: 0,502; 50: 0,446;
+52: 0,465; 57: 0,555) rồi hồi ngay epoch sau, không ứng với mốc LR nào. Vì thế đừng
+đọc 0,627 của epoch 26 là "hơn hẳn" 0,593 của epoch 60 — với eval 450 ảnh, chênh
+0,03 nằm trong nhiễu.
+
+**Đối chiếu mốc đã đăng ký ở §2.1** (*"đừng kỳ vọng mAP@50 > 0,9; khoảng hợp lý
+0,4–0,7"*): E1 ra mAP@50 **0,733–0,816** — **trên** khoảng đã đăng ký, và vẫn dưới
+0,9 đúng như dự đoán. Đây là số trên val 450 ảnh của chính FloodNet, không phải chỉ
+số để so với bài toán khác.
+
+**Chỗ yếu nhất: vật nhỏ.** mAP vật lớn 0,68–0,70 nhưng vật nhỏ chỉ 0,145–0,174 —
+đúng như lo ngại ở §2.1: nhà nhỏ trong ảnh 1536 px là chỗ mô hình hụt hơi. Với đầu
+ra cuối cùng là **đếm** nhà, đây là con số phải nhớ khi đọc kết quả đếm: nhà to thì
+đếm được, nhà nhỏ dễ sót.
+
+**E1 so với `[3.10]` (cùng recipe, 20 ảnh overfit, mAP 0,618):** nhích hơn, đúng
+chiều mong đợi. Hai số không đo cùng một tập (0,618 là val trên chính 20 ảnh train
+của `[3.10]`; 0,627 là val 450 ảnh của E1) nên chỉ nên đọc là "cùng cỡ" — và cùng
+cỡ ở hai bài toán khác hẳn nhau thì càng cho thấy trần của recipe này nằm quanh
+0,6–0,65 chứ không phải ở dữ liệu.
+
+**Hồ sơ:** 3 tệp log + `scalars.json` từng đoạn + 3 checkpoint nằm trong zip người
+dùng tải về (`e1_cascade_convnext_t-…zip`, 859 MB, **không commit**). Số liệu ở mục
+này đọc trực tiếp từ trong zip, không giải nén 900 MB checkpoint ra đĩa.
+
+---
+
 ## 4. Việc tiếp theo
 
 1. ~~Chạy `notebooks/00_colab_setup.ipynb` trên Colab (GPU T4) → chốt GATE 0.~~
@@ -1749,7 +1851,11 @@ chọn recipe cho train thật:
      minh — thứ chặn `[3.10]` là recipe, không phải lỗi dữ liệu. Số đo đầy đủ ở
      **§3.15**.
 6. **Recipe của `[3.11]` (Phase 4 — train thật trên 2.343 ảnh) ĐÃ CHỐT ngày
-   07/10/2026; việc còn lại chỉ là chạy.** Ba mục, căn cứ §3.15:
+   07/10/2026, VÀ ĐÃ CHẠY XONG cùng ngày.** Kết quả: 60/60 epoch, thoát 0,
+   **best mAP 0,627 / mAP@50 0,816** (epoch 26, tệp `best_coco_bbox_mAP_epoch_26.pth`),
+   mAP cuối 0,593; 2 lần tự resume giữa chừng đều sạch; 3 giờ 32 phút trên A100.
+   Số đầy đủ + cách đọc ở **§3.16**. Ba mục recipe dưới đây giữ nguyên làm hồ sơ
+   (đã chốt TRƯỚC khi chạy, căn cứ §3.15):
    - **số epoch: 60** (quyết định cùng người dùng; dự kiến chạy trên A100). Căn
      cứ: `[3.9]` đo 10,4 phút/epoch trên T4 → 60 epoch ≈ 10,4 giờ T4 / ~3 giờ
      A100 (ước tính — `[3.9]` in số thật trên máy đang chạy); checkpoint tốt nhất
@@ -1767,10 +1873,34 @@ chọn recipe cho train thật:
      các thí nghiệm E2–E7. Muốn đổi số epoch cho một thí nghiệm thì phải ghi lại
      lý do: E2–E7 so với E1 nên phải chạy cùng recipe.
 
-   Rồi chạy ô `[3.11]` trên Colab. Ô đó **tự resume** nếu `work_dir` trên
-   Drive đã có checkpoint (cả hai lỗi resume đã vá: §3.13 và §3.14) nên Colab ngắt
-   giữa chừng thì cứ chạy lại — không mất kết quả. Ô `[3.3b]` tự cài môi trường
-   (gọi `scripts/cai_moi_truong.py`, §1.9) nên **không phải mở notebook 00 ở tab
-   thứ hai**. Phải **push lên GitHub trước** — Colab clone code từ GitHub, chưa
-   push là Colab chạy đúng bản cũ.
+   Ô `[3.11]` **tự resume** nếu `work_dir` trên Drive đã có checkpoint (cả hai lỗi
+   resume đã vá: §3.13 và §3.14) — điều này đã được kiểm chứng THẬT trong chính lần
+   chạy E1: hai lần dừng giữa chừng, hai lần chạy lại ăn ngay từ checkpoint, xem
+   §3.16. Ô `[3.3b]` tự cài môi trường (gọi `scripts/cai_moi_truong.py`, §1.9) nên
+   **không phải mở notebook 00 ở tab thứ hai**. Phải **push lên GitHub trước** —
+   Colab clone code từ GitHub, chưa push là Colab chạy đúng bản cũ.
    Không đụng tới `floodnet_raw.zip` 13 GB nữa — chỉ cần `floodnet_coco.zip` 1,86 GB.
+
+7. **Dùng mô hình: công cụ thử trên ảnh thật (viết xong 07–08/10/2026, chờ push để
+   Colab chạy).** Sau khi E1 xong, việc tiếp theo là NHÌN mô hình đếm trên ảnh —
+   mAP không nói gì về chuyện đếm. Đã thêm:
+   - `src/floodcount/infer/dem.py` — logic thuần Python, test được trên máy CPU:
+     đếm theo lớp + ngưỡng điểm, đối chiếu nhãn thật từ COCO, chọn ảnh demo (một
+     nửa có nhà ngập), tìm checkpoint best trong `work_dir`.
+   - `scripts/du_doan.py` — CLI hai chế độ: `--anh-dir` (ảnh của người dùng, không
+     có nhãn nên chỉ in số mô hình đếm) và demo trên một split của dataset (**có**
+     đối chiếu nhãn thật — cách duy nhất để biết con số đếm có đáng tin). Vẽ overlay
+     (box đỏ = ngập) và ghi `du_doan.json`.
+   - `scripts/web_du_doan.py` — trang web Gradio: kéo ảnh vào → ảnh đã vẽ box + số
+     đếm, kèm thanh trượt ngưỡng điểm; `--share` cho link công khai mở được trên
+     điện thoại. Lõi suy luận dùng lại nguyên `du_doan.py`.
+   - `notebooks/03_train.ipynb` — ô `[3.12]` (thả ảnh vào
+     `MyDrive/Flood_House_AI/anh_cua_toi/` rồi chạy, overlay hiện ngay trong ô) và
+     ô `[3.13]` (mở trang web, link sống theo phiên Colab).
+   - `tests/test_du_doan.py` — 68 phép kiểm, chạy trên máy không cài
+     mmdet/gradio/torch.
+
+   Việc còn lại: push → chạy `[3.12]` và/hoặc `[3.13]` trên Colab → xem số đếm trên
+   ảnh thật. Nhắc lại giới hạn đã ghi ở §2.1 và trong ô `[3.12]`: mô hình học ảnh
+   chụp **từ trên cao**; ảnh chụp ngang tầm mắt sẽ kém, và đó là giới hạn dữ liệu
+   chứ không phải lỗi code.
