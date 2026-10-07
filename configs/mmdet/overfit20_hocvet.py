@@ -60,28 +60,37 @@
 # lúc dựng `LinearLR` + trạng thái lịch cũ được nạp lại). Số của lần chạy đó
 # KHÔNG được dùng để chốt gì: "bão hoà ở LR sai" không nói gì về trần thật.
 #
-# CHẠY LẠI — giai đoạn 2 lần hai: chạy MỚI trọn 120 epoch, KHÔNG resume.
-#   - Không resume được nữa: `epoch_40.pth` đã bị `max_keep_ckpts=2` xoá từ lâu,
-#     còn thư mục cũ đã ở epoch 120 nên resume vào đó là no-op.
-#   - Lịch của lần chạy mới ĐÚNG BẰNG lịch mà "giai đoạn 1 + giai đoạn 2" đã
-#     định ghép lại: 30 epoch đầu ở 1e-3, rồi 1e-4 cố định tới hết epoch 120.
-#   - Bản vá §3.14 chỉ can thiệp khi resume, nên lần chạy mới này đi đúng đường
-#     cũ — không có gì mới để tin, chỉ có lịch LR đúng.
-# Xác nhận trong log (dừng báo ngay nếu lệch):
-#   - epoch 1-12: LR leo dần từ 1e-6 lên ~9,8e-4 (warmup 50 vòng, hết giữa
-#     epoch 13);
-#   - cuối epoch 13: `base_lr: 1.0000e-03`;
-#   - epoch 14-30: giữ 1.0000e-03;
+# CHẠY LẠI — giai đoạn 2 lần hai: ĐÃ CHẠY XONG 07/10/2026 (trọn 120/120 epoch,
+# thoát 0, thư mục overfit20_hocvet2; log không resume — "Did not find
+# last_checkpoint to be resumed"). Không resume được nữa nên phải chạy mới:
+# `epoch_40.pth` đã bị `max_keep_ckpts=2` xoá từ lâu, còn thư mục cũ đã ở epoch
+# 120 nên resume vào đó là no-op. Lịch của lần chạy mới ĐÚNG BẰNG lịch mà "giai
+# đoạn 1 + giai đoạn 2" đã định ghép lại: 30 epoch đầu ở 1e-3, rồi 1e-4 cố định
+# tới hết epoch 120. Bản vá §3.14 chỉ can thiệp khi resume, nên lần chạy này đi
+# đúng đường cũ — không có gì mới để tin, chỉ có lịch LR đúng.
+# Log xác nhận lịch (10 vòng/epoch, nên warmup 50 vòng hết ở CUỐI EPOCH 5 —
+# không phải "epoch 13" như bản ghi đầu tiên, con số đó suy nhầm từ harness đo 4
+# vòng/epoch; xem docs/NOTES.md §3.15):
+#   - epoch 1-4: LR leo dần 1,8449e-04 -> 7,9612e-04 (warmup);
+#   - từ dòng epoch 5: `base_lr: 1.0000e-03` (giữ tới hết epoch 30);
 #   - TỪ EPOCH 31: `base_lr: 1.0000e-04`, giữ nguyên tới epoch 120.
 #
-# Chốt đọc giai đoạn 2 (giữ nguyên, không dịch mốc):
+# KẾT QUẢ (đọc theo chốt đã đăng ký ở dưới — chốt ghi "thấy > 0,95 là DỪNG ĐƯỢC
+# ngay", tức tiêu chí tính theo lúc ĐẠT TRONG lúc chạy):
+#   - mAP đạt >= 0,95 ở 4 epoch: 100 (0,950), 110 (0,952), 114 (0,951),
+#     116 (0,952) -> best_coco_bbox_mAP_epoch_110.pth = 0,952, nằm trên Drive;
+#   - số của epoch cuối (120) là 0,918 — dao động của eval 20 ảnh + LR đứng yên
+#     1e-4, KHÔNG phải trần thật (trần thật theo chốt là chững *dưới* 0,9);
+#   - mAP50 = mAP75 = 1,000 ở cả hai lớp; AP vật nhỏ 0,900; AR 0,939.
+#   => CHỐT GATE 3 ĐẠT (07/10/2026, quyết định cùng người dùng). Số đo đầy đủ ở
+#      docs/NOTES.md §3.15.
+# Chốt đọc đã đăng ký trước khi chạy (giữ nguyên làm hồ sơ):
 #   - mAP > 0,95  -> GATE 3 ĐẠT, bàn tiếp LR + số epoch cho train thật.
 #   - bão hoà < 0,9 (10 epoch liền nhích < 0,01) -> trần thật; đào tiếp bằng
-#     AP từng lớp (non_flooded đang thua flooded 0,14) + ảnh vis_data.
+#     AP từng lớp + ảnh vis_data.
 #   - 0,9-0,95, hoặc hết 120 epoch mà còn leo -> gửi số liệu, quyết định cùng.
-# Thấy > 0,95 là DỪNG ĐƯỢC: checkpoint epoch vừa xong đã ghi ra Drive rồi.
 #
-# Thời lượng: 120 epoch liền mạch ~20 phút trên A100, ~50-60 phút trên T4.
+# Thời lượng thực tế: ~17 phút trên A100 (120 epoch liền mạch).
 #
 # ⚠️ Vẫn là điểm trên tập TRAIN. Tuyệt đối không trích dẫn mAP của tệp này vào
 # báo cáo như một kết quả của đồ án (xem đầu tệp overfit20.py).

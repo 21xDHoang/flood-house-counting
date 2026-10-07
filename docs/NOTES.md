@@ -1548,7 +1548,7 @@ nhỏ và dataloader bằng 8 mẫu rỗng. Sáu ca, tất cả ĐẠT:
 
 | Ca | Kết quả |
 |---|---|
-| Chạy liên tục 120 epoch (tham chiếu) | warmup kết thúc trong epoch 13; mốc [30] nổ ở cuối epoch 30 (epoch 31 trở đi học ở 1e-4) |
+| Chạy liên tục 120 epoch (tham chiếu) | warmup kết thúc trong epoch 13 — harness dùng **4 vòng/epoch**; dữ liệu thật 10 vòng/epoch nên warmup hết ở cuối epoch 5 (§3.15). Mốc [30] nổ ở cuối epoch 30 (epoch 31 trở đi học ở 1e-4) |
 | Resume **không vá** | `1.0000e-06` — tái hiện đúng con số Colab |
 | Resume **có vá** | `1.0000e-04` ngay sau resume, và khớp lần chạy liên tục ở **MỌI** epoch 40..119 (không sai epoch nào) |
 | Chạy MỚI có vá | LR y hệt lần chạy sạch ở cả 120 epoch — vá không đụng vào chạy mới |
@@ -1577,10 +1577,81 @@ giá trị hiện có, phép nhân giao hoán; nếu sau này trộn lịch "đ�
 lặng). Nên lần chạy đúng là **một lần chạy MỚI trọn 120 epoch trong
 `overfit20_hocvet2`** — đúng bằng lịch mà giai đoạn 1 + 2 đã định ghép lại. Bản
 vá không tham gia lần chạy này (nó chỉ can thiệp khi resume), nên phép kiểm nằm
-ở chính dòng log LR, ghi sẵn trong đầu config: cuối epoch 13 = `1.0000e-03`,
-và TỪ EPOCH 31 = `1.0000e-04` giữ tới hết. Chốt đọc không đổi.
+ở chính dòng log LR, ghi sẵn trong đầu config: TỪ EPOCH 31 = `1.0000e-04` giữ tới
+hết. (Bản checklist đầu tiên còn ghi "cuối epoch 13 = `1.0000e-03`" — SAI, xem
+đính chính ở **§3.15**: con số đó suy từ harness 4 vòng/epoch, dữ liệu thật 10
+vòng/epoch nên warmup hết ở cuối epoch 5.) Chốt đọc không đổi.
 
 **Số phép kiểm:** 476 → **495**. Cả 8 bộ PASS trên máy 07/10/2026.
+
+### 3.15 GATE 3 ĐẠT — [3.10b] lần chạy đúng: 120 epoch, best mAP 0,952 (07/10/2026)
+
+Lần chạy MỚI trong `runs/sanity/overfit20_hocvet2` (thay cho lần resume vô hiệu ở
+§3.14) đã chạy trọn **120/120 epoch, thoát 0**, không NaN. Đây là lần chạy `[3.10b]`
+đầu tiên có lịch LR đúng, và nó trả lời dứt điểm câu hỏi của GATE 3. Hai dòng đầu
+log xác nhận KHÔNG resume (`Did not find last_checkpoint to be resumed` /
+`Auto resumed from the latest checkpoint None`) — đúng là chạy mới từ epoch 1.
+
+**Lịch LR trong log** (10 vòng/epoch: 20 ảnh, batch 2):
+- epoch 1–4: `base_lr` leo dần `1,8449e-04 → 7,9612e-04` (warmup 50 vòng);
+- dòng epoch 5 trở đi: **`1.0000e-03`** (giữ tới hết epoch 30, 26 dòng);
+- TỪ EPOCH 31 tới 120: **`1.0000e-04`** (90 dòng) — mốc `[30]` nổ đúng.
+
+> ⚠️ **Đính chính số liệu của chính §3.14/§4 (và đã sửa ở config/notebook/README):**
+> bản checklist đầu tiên ghi *"warmup hết giữa epoch 13, cuối epoch 13 =
+> `1.0000e-03`"*. Con số đó **SAI**: nó suy từ harness kiểm chứng bản vá — mà harness
+> dùng 8 ảnh / batch 2 = **4 vòng/epoch**, còn dữ liệu thật là 20 ảnh / batch 2 =
+> **10 vòng/epoch**, nên 50 vòng warmup hết ở CUỐI EPOCH 5. Bản vá không hề bị ảnh
+> hưởng (nó tự đếm bằng `runner.iter`, không hard-code vòng/epoch — đó là lý do
+> harness 4 vòng/epoch vẫn kiểm chứng đúng được); chỉ con số ghi trong tài liệu sai,
+> và chỉ mốc epoch 31 mới là mốc dùng để chốt nên không ảnh hưởng kết luận.
+
+**Đường cong mAP** (val trên chính 20 ảnh train):
+
+| Epoch | 30 | 40 | 50 | 88 | 100 | 110 | 114 | 116 | 120 |
+|---|---|---|---|---|---|---|---|---|---|
+| mAP | 0,447 | **0,741** | 0,833 | 0,909 | **0,950** | **0,952** | 0,951 | **0,952** | 0,918 |
+
+- **epoch 40 = 0,741 khớp gần như y hệt giai đoạn 1 (0,742)** — hai lần chạy độc
+  lập cho cùng kết quả ở cùng epoch: tái lập tốt, và càng chắc rằng số của giai
+  đoạn 1 không phải may mắn.
+- Sau mốc `[30]`: 10 epoch leo +0,37 (0,475 → 0,833 ở epoch 50) — đúng kiểu "vừa hạ
+  LR là leo" đã thấy ở giai đoạn 1, nhưng lần này còn 90 epoch để đi tiếp.
+- **Đuôi 0,918–0,952 = đã chững dạng DAO ĐỘNG, không còn leo**: 10 epoch cuối nhích
+  −0,024 (10 epoch trước đó +0,023). Nguyên nhân dao động: LR đứng yên 1e-4 không
+  giảm + eval chỉ 20 ảnh (biên độ ±0,03 là bình thường). Đây KHÔNG phải "trần thật"
+  — nhánh trần thật yêu cầu chững *dưới* 0,9.
+
+**Eval cuối (epoch 120):** mAP **0,918** — **mAP50 = mAP75 = 1,000**; AP theo vật:
+nhỏ **0,900** / vừa 0,930 / lớn 0,922 (vật nhỏ đã leo từ 0,657 ở epoch 50); AR 0,939;
+classwise flooded 0,908 / non_flooded 0,927 — **mỗi lớp đều mAP50 = mAP75 = 1,0**.
+Nghĩa là: tìm đúng hết nhà, đúng lớp, box khít tới IoU 0,75; phần mAP còn thiếu nằm
+hết ở các ngưỡng IoU 0,85–0,95 (rung vài pixel ở mép box) — không ảnh hưởng bài toán
+đếm. Checkpoint tốt nhất: `best_coco_bbox_mAP_epoch_110.pth` = **0,952** (trên Drive).
+
+**Đối chiếu với lần chạy dính lỗi LR (§3.14)** — cùng xuất phát từ epoch 40:
+bản đúng đi **0,741 → 0,918** (best 0,952); bản lỗi đi 0,747 → 0,779 suốt 80 epoch.
+Lỗi im lặng "ăn" ~0,17 mAP và suýt dẫn tới kết luận sai "trần thật ~0,78".
+
+**Chốt GATE 3: ĐẠT** (quyết định cùng người dùng, 07/10/2026). Căn cứ: chốt đăng ký
+ghi *"mAP > 0,95 → GATE 3 ĐẠT; thấy > 0,95 là DỪNG ĐƯỢC ngay (checkpoint epoch vừa
+xong đã ghi ra Drive)"* — tức tiêu chí tính theo lúc ĐẠT TRONG lúc chạy, và đường
+cong đã đạt ≥ 0,95 ở 4 epoch (100, 110, 114, 116), best 0,952. Ghi rõ cả hai con số
+ở đây (0,952 best và 0,918 cuối) để không ai trích dẫn một con mà bỏ con kia —
+**và tuyệt đối không trích dẫn cả hai như kết quả của đồ án**: đây là điểm trên tập
+TRAIN 20 ảnh, chỉ chứng minh đường ống học được.
+
+**Hệ quả:** đường ống (dữ liệu → nhãn → kiến trúc → loss → eval) đã được chứng minh;
+nguyên nhân `[3.10]` dừng ở 0,618 là RECIPE (tăng cường mạnh + LR bị bóp bởi
+milestones [40, 55] trên 60 epoch), không phải lỗi dữ liệu. Trước `[3.11]` còn phải
+chọn recipe cho train thật:
+- **LR 1e-4 của config chính là mức chạy được** (1e-3 suốt 30 epoch chỉ loanh quanh
+  0,45) → giữ nguyên `base_lr`;
+- **không kết luận được gì về tăng cường** từ `[3.10b]`: phép thử cố ý đổi hai biến
+  cùng lúc (tắt tăng cường + LR ×10) — đúng như thiết kế đã ghi ở đầu config; tách
+  biến là việc của Phase 4, không phải của GATE;
+- **số epoch**: đo được từ `[3.9]` là ~10,4 phút/epoch trên T4 (866,3 ms/vòng) →
+  quyết định theo ngân sách thời gian, không phải theo phép thử overfit này.
 
 ---
 
@@ -1668,18 +1739,29 @@ và TỪ EPOCH 31 = `1.0000e-04` giữ tới hết. Chốt đọc không đổi.
      (`scripts/train.py`), kiểm chứng bằng Runner THẬT (6 ca, khớp lần chạy liên
      tục từng epoch), khoá bằng 18 phép kiểm AST (đã kiểm âm). Chi tiết ở
      **§3.14**.
-6. **Bước kế tiếp ngay: chạy MỚI ô `[3.10b]` trên Colab — trọn 120 epoch trong
-   `overfit20_hocvet2`** (giai đoạn 2 lần đầu đã chạy nhưng vô hiệu vì lỗi LR
-   §3.14; `epoch_40.pth` cũng đã bị `max_keep_ckpts=2` xoá, và thư mục cũ đã ở
-   epoch 120 nên resume vào đó là no-op im lặng). ~20 phút trên A100, ~50-60 phút
-   trên T4. Phải **push lên GitHub trước** — Colab clone code từ GitHub, chưa
-   push là Colab chạy đúng bản cũ. Ô `[3.3b]` tự cài môi trường (gọi
-   `scripts/cai_moi_truong.py`, §1.9) nên **không phải mở notebook 00 ở tab thứ
-   hai**. Phép kiểm LR ghi sẵn ở đầu config (lần này KHÔNG có dòng `[vá] LR sau
-   resume` vì không resume): epoch 1–12 LR leo từ 1e-6 lên ~9,8e-4; cuối epoch 13
-   = **1.0000e-03**; TỪ EPOCH 31 = **1.0000e-04** giữ tới hết. Thấy 1e-6 sau
-   epoch 13 là warmup không chạy — dừng báo ngay. Đọc kết quả theo chốt ghi sẵn ở
-   §3.12/§3.14: **mAP > 0,95 → GATE 3 ĐẠT**; bão hoà < 0,9 → trần thật, đào bằng
-   AP từng lớp; 0,9–0,95 hoặc còn leo khi hết 120 → báo lại để quyết định cùng
-   nhau. Xong GATE 3 mới sang Phase 4.
+   - **`[3.10b]` lần chạy đúng ngày 07/10/2026 (một lần chạy MỚI trọn 120 epoch,
+     thư mục `overfit20_hocvet2`): GATE 3 ĐẠT.** mAP đạt ≥ 0,95 ở 4 epoch (100,
+     110, 114, 116), best **0,952** (`best_coco_bbox_mAP_epoch_110.pth`); số cuối
+     epoch 120 là 0,918 (dao động của eval 20 ảnh — không phải trần); mAP50 =
+     mAP75 = **1,000** ở cả hai lớp; AP vật nhỏ 0,900. Đường ống đã được chứng
+     minh — thứ chặn `[3.10]` là recipe, không phải lỗi dữ liệu. Số đo đầy đủ ở
+     **§3.15**.
+6. **Bước kế tiếp: chốt recipe cho `[3.11]` (Phase 4 — train thật trên 2.343 ảnh),
+   rồi mới chạy.** GATE 3 đã đạt nên không còn phép thử nào phải chạy nữa. Ba thứ
+   cần chốt, căn cứ §3.15:
+   - **số epoch**: mặc định 24 trong `cascade_convnext_t_floodnet.py` là con số
+     TẠM, chưa chốt; đo đạc `[3.9]` cho ~10,4 phút/epoch trên T4 → chốt theo ngân
+     sách thời gian chạy được;
+   - **lịch LR**: giữ `base_lr` 1e-4 (bằng chứng: 1e-3 chỉ loanh quanh 0,45 sau 30
+     epoch); `scripts/train.py` tự chỉnh mốc giảm LR theo tỉ lệ khi đổi số epoch;
+   - **tăng cường**: lượt baseline E1 giữ nguyên recipe hiện tại (GATE 3 không tách
+     được biến này — `[3.10b]` cố ý đổi hai thứ cùng lúc); tách biến là việc của
+     các thí nghiệm E2–E7.
+
+   Sau khi chốt: chạy ô `[3.11]` trên Colab. Ô đó **tự resume** nếu `work_dir` trên
+   Drive đã có checkpoint (cả hai lỗi resume đã vá: §3.13 và §3.14) nên Colab ngắt
+   giữa chừng thì cứ chạy lại — không mất kết quả. Ô `[3.3b]` tự cài môi trường
+   (gọi `scripts/cai_moi_truong.py`, §1.9) nên **không phải mở notebook 00 ở tab
+   thứ hai**. Phải **push lên GitHub trước** — Colab clone code từ GitHub, chưa
+   push là Colab chạy đúng bản cũ.
    Không đụng tới `floodnet_raw.zip` 13 GB nữa — chỉ cần `floodnet_coco.zip` 1,86 GB.

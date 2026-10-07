@@ -28,7 +28,7 @@ Số liệu và phát hiện đã kiểm chứng thật: [`docs/NOTES.md`](docs/
 | 0 | Khởi tạo repo + kiểm tra môi trường Colab | ✅ **GATE 0 đạt** — chạy thật trên Colab T4, đã kiểm chứng đủ (`docs/NOTES.md` §1.5–§1.6) |
 | 1 | Khám phá dữ liệu (EDA) & quyết định tiền xử lý | ✅ **GATE 1 đạt (30/09/2026)** — 4 tham số đã chốt (`docs/NOTES.md` §2.5) |
 | 2 | Chuyển mask → COCO & tiền xử lý offline | ✅ **GATE 2 đạt (30/09/2026)** — 2.343 ảnh, 6.301 box, đối chiếu Phase 1 khớp hoàn toàn (`docs/NOTES.md` §2.7) |
-| 3 | Cấu hình model & sanity check (overfit 20 ảnh) | 🟡 **GATE 3 chưa đạt (07/10/2026)** — `[3.6]`–`[3.9]` xong (số đo `--dry-run`: 866,3 ms/vòng, 10,4 phút/epoch, VRAM 7,81/14,56 GB). `[3.10]` chạy lại bằng bản sửa `{{_base_.}}`: chạy sạch đủ 60/60 epoch nhưng mAP dừng ở **0,618** (bão hoà). Ô `[3.10b]` (học vẹt, tắt tăng cường, LR ×10) giai đoạn 1 (40 epoch): mAP **0,742** (mAP50 0,905) và đuôi đường cong **vẫn leo** — recipe là thứ chặn, lỗi đường ống chưa đứng vững thêm một bậc, nhưng mốc 0,95 chưa đạt. Lần nối tiếp tới 120 epoch (giai đoạn 2, chạy bằng `resume`) **đã chạy nhưng kết quả VÔ HIỆU**: cả 80 epoch train ở LR **1e-6** thay vì 1e-4 — **lỗi thật thứ tư trên Colab, lần đầu tiên IM LẶNG** (`save_optimizer=False` làm resume bỏ qua optimizer; `LinearLR` nhân sẵn `start_factor` lúc dựng; trạng thái lịch trong checkpoint đóng băng LR), đã vá bằng `dat_lai_lr_sau_resume` + hook `before_train` trong `scripts/train.py`, **kiểm chứng bằng Runner thật** (6 ca, khớp lần chạy liên tục từng epoch). Bước kế tiếp: chạy **MỚI** trọn 120 epoch trong `runs/sanity/overfit20_hocvet2` — resume không còn đường (checkpoint epoch 40 đã bị `max_keep_ckpts=2` xoá, thư mục cũ đã ở epoch 120). Xem `docs/NOTES.md` §3.9, §3.11–§3.14 |
+| 3 | Cấu hình model & sanity check (overfit 20 ảnh) | ✅ **GATE 3 đạt (07/10/2026)** — `[3.6]`–`[3.9]` xong (số đo `--dry-run`: 866,3 ms/vòng, 10,4 phút/epoch, VRAM 7,81/14,56 GB). `[3.10]` (60 epoch) dừng ở mAP **0,618**, nhưng ô `[3.10b]` (học vẹt điều kiện dễ nhất: tắt tăng cường, LR ×10) chạy **MỚI trọn 120/120 epoch** trong `runs/sanity/overfit20_hocvet2`: mAP đạt ≥ 0,95 ở **4 epoch** (100, 110, 114, 116), best **0,952** (`best_coco_bbox_mAP_epoch_110.pth`), mAP50 = mAP75 = 1,000 ở **cả hai lớp**, AP vật nhỏ 0,900 → **đường ống đúng; thứ chặn `[3.10]` là recipe (LR/tăng cường), không phải lỗi nhãn/box/loss/eval**. Số cuối epoch 120 là 0,918 — dao động của eval 20 ảnh, không phải trần thật. Ba lỗi thật trên Colab gặp trong quá trình này (`{{_base_.}}`, unpickle khi resume trên torch ≥ 2.6, lỗi LR 1e-6 sau resume im lặng) đều đã vá trong `scripts/train.py` — `docs/NOTES.md` §3.11–§3.15. Kết quả overfit **không phải** kết quả của đồ án |
 | 4 | Huấn luyện baseline (E1) | ⏳ |
 | 5 | Đánh giá mAP + sai số đếm & phân tích lỗi | ⏳ |
 | 6 | Thí nghiệm cải thiện & ablation (E2–E7) | ⏳ |
@@ -152,23 +152,29 @@ Mở `notebooks/03_train.ipynb` và chạy từ trên xuống:
 | `[3.8]` | Dựng `instances_overfit20.json` (20 ảnh, seed 42) | vài giây |
 | `[3.9]` | **`train.py --dry-run`** — chạy thử vài vòng, đo thời gian 1 epoch thật (GATE 3) | ~5 phút |
 | `[3.10]` | Train overfit 20 ảnh — **phép thử đường ống** (GATE 3) | 20–40 phút |
-| `[3.10b]` | **Chỉ chạy khi `[3.10]` chưa đạt** — học vẹt điều kiện dễ nhất (tắt tăng cường, LR ×10) để phân biệt lỗi đường ống với recipe; lần này chạy mới trọn 120 epoch | 20–60 phút |
+| `[3.10b]` | **Chỉ chạy khi `[3.10]` chưa đạt** — học vẹt điều kiện dễ nhất (tắt tăng cường, LR ×10) để phân biệt lỗi đường ống với recipe. **Đã chạy xong 07/10/2026** (120 epoch, best mAP 0,952 → GATE 3 ĐẠT) | 20–60 phút |
 | `[3.11]` | Train thật (Phase 4) | 6–8 giờ |
 
-**Dừng sau ô `[3.10]` (hoặc `[3.10b]` nếu `[3.10]` chưa đạt) và báo cáo lại.** Ô
-`[3.10b]` chỉ chạy khi `[3.10]` chưa đạt mốc 0,9 — kết quả đọc theo chốt ghi sẵn ở
-`docs/NOTES.md` §3.12. Giai đoạn 1 (40 epoch) chạy 07/10/2026 dừng ở 0,742 còn leo;
-lần resume (nối tới 120 epoch) **vô hiệu vì lỗi LR im lặng** (§3.14) nên lần chạy
-đúng là chạy **MỚI** trọn 120 epoch trong `runs/sanity/overfit20_hocvet2`, sau
-`git pull`. Log phải in hai dòng `[vá]` trước khi train bắt đầu: `[vá] torch.load: ...`
-(resume từng nổ HAI lần trên torch ≥ 2.6 — thiếu `HistoryBuffer`, rồi thiếu mảng
-numpy/dtype/`getattr` chứa trong nó — đã vá trọn ở `scripts/train.py`, §3.13) và
-`[vá] LR sau resume: ...` (§3.14). Rồi liếc 2 dòng LR: cuối epoch 13 phải là
-`base_lr: 1.0000e-03`, từ epoch 31 phải là `base_lr: 1.0000e-04`. Ô chạy xong trong
-vài giây, không in dòng epoch nào = chưa `git pull` (config cũ trỏ vào thư mục đã ở
-epoch 120, resume thành no-op).
-Ô `[3.11]` là Phase 4, chỉ
-chạy sau khi chốt GATE 3 — 24 epoch trong config hiện tại là **mặc định tạm**.
+**GATE 3 đã chốt ĐẠT ngày 07/10/2026** (số đo đầy đủ: `docs/NOTES.md` §3.15). Ô
+`[3.10b]` chạy mới trọn 120 epoch trong `runs/sanity/overfit20_hocvet2`: mAP ≥ 0,95
+ở 4 epoch (100, 110, 114, 116), best **0,952** (epoch 110), số cuối (epoch 120) là
+0,918 — dao động của eval 20 ảnh, không phải trần thật. Hai điều rút ra cho Phase 4:
+LR chạy được là **1e-4** (config chính đang đúng, không phải 1e-3), và
+tắt-tăng-cường + tăng-epoch đã cho model học vẹt được 20 ảnh → **không có lỗi
+nhãn/box/loss/eval**.
+
+Nếu chạy lại `[3.10b]` vì nghi ngờ chính config: dùng thư mục work_dir **mới** hoặc
+`--no-resume` (thư mục `overfit20_hocvet2` đã ở epoch 120 nên chạy lại vào đó là
+no-op im lặng), và log phải in các dòng `[vá]` trước khi train (resume từng nổ hai
+lần trên torch ≥ 2.6 — §3.13; lỗi LR 1e-6 sau resume im lặng — §3.14). Lịch LR của
+lần chạy đúng: 10 vòng/epoch nên warmup 50 vòng hết ở **cuối epoch 5** — bản ghi
+đầu tiên ghi nhầm "epoch 13", con số đó suy nhầm từ harness đo 4 vòng/epoch (đính
+chính ở §3.15); từ epoch 31 là `base_lr: 1.0000e-04` tới hết epoch 120.
+
+Bước kế tiếp: **chốt recipe cho `[3.11]`** — số epoch theo ngân sách thời gian (24
+epoch trong config hiện tại là **mặc định tạm**; ~10,4 phút/epoch trên T4), giữ
+`base_lr` 1e-4, giữ nguyên tăng cường cho baseline E1 (`docs/NOTES.md` §4 mục 6) —
+rồi mới chạy `[3.11]`, và **push lên GitHub trước** khi Colab chạy.
 
 Điều notebook này **không** làm: **không chạy test trên tập test**. Test chỉ được chạy
 **một lần duy nhất** ở Phase 5; chọn ngưỡng đếm và chọn checkpoint đều lấy từ val. Tập
