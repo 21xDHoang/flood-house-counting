@@ -406,6 +406,9 @@ def main():
     bao_cao2 = cmt.xoa_cache_mmpretrain(modules=sys_gia, reg_mmengine=reg)
     kiem("đã xoá 0 module" in bao_cao2 and "0 registry gốc" in bao_cao2,
          "chay lan hai: 0 module, 0 registry (vo hai)")
+    kiem("chưa từng nạp mmpretrain" in bao_cao2,
+         f"0/0 tren phien sach -> noi ro la binh thuong, khong de nguoi doc "
+         f"tu hoi: {bao_cao2!r}")
 
     # (d) Đúng thứ tự đã gây lỗi: sau khi vá thì nạp lại KHÔNG nổ.
     try:
@@ -438,6 +441,13 @@ def main():
                                         reg_mmengine=ModGia())
     kiem("[!]" in bao_cao5 and "KHÔNG chạy" in bao_cao5,
          "quet hut (0 registry goc) -> bao [!] la mieng va khong chay")
+
+    # Hai số 0 nhưng do QUÉT HỤT thì tuyệt đối không được nói "bình thường" —
+    # đó là ca nguy hiểm nhất: output trông y hệt phiên mới toanh nhưng thật ra
+    # miếng vá không chạy. Câu "bình thường" chỉ dành cho ca thấy đủ registry.
+    bao_cao6 = cmt.xoa_cache_mmpretrain(modules={}, reg_mmengine=ModGia())
+    kiem("bình thường" not in bao_cao6 and "[!]" in bao_cao6,
+         "0/0 do quet hut -> KHONG noi 'binh thuong', van bao [!]")
 
     # ======================================================================
     print("\n=== 11. Hai notebook goi dung ham nay, khong tu xoa tay ===")

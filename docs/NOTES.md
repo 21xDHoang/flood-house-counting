@@ -1834,11 +1834,17 @@ rồi chạy lại ô `[3.4]`. Đường chắc chắn hơn: restart runtime r�
 nhiễm → `import mmpretrain` in `OK 1.2.0`, rồi chạy lại ô `[3.4]` báo `Sẵn sàng.`
 với đủ 6 gói (torch 2.11.0+cu130, mmcv 2.2.0, mmengine 0.10.7, mmdet 3.3.0,
 mmpretrain 1.2.0). Đúng như chẩn đoán: con registry cũ là thứ duy nhất chặn.
-Hai ghi chú từ lần chạy này: (1) `pycocotools : ?` là bình thường — gói không
+Ba ghi chú từ lần chạy này: (1) `pycocotools : ?` là bình thường — gói không
 khai báo `__version__`; ô `[3.4]` đã sửa để in rõ "đã cài (không khai báo
-__version__)" thay vì dấu `?` trông như lỗi; (2) đường TỰ ĐỘNG (ô `[3.3b]` bản
-mới) chưa chạy lại trong phiên đang nhiễm đó — phiên đó gỡ bằng miếng vá dán
-tay, còn `[3.3b]` bản mới sẽ được dùng ở phiên Colab kế tiếp.
+__version__)" thay vì dấu `?` trông như lỗi; (2) đường TỰ ĐỘNG đã chạy đúng
+trong một runtime mới toanh (clone `656587a`, `/content` trống nên cài lại từ
+đầu): ô `[3.3b]` in "đã xoá 0 module / đã rút tên khỏi 0 registry gốc" — kernel
+chưa từng nạp mmpretrain nên không có gì phải xoá, và KHÔNG có dòng `[!]` nào
+nghĩa là quét thấy registry gốc bình thường; (3) hai số 0 đó vẫn làm người đọc
+phải hỏi lại ("thế là hỏng hay bình thường?"), nên hàm vá nay in thêm một câu
+nói rõ "bình thường khi vừa mở runtime" — nhưng CHỈ khi quét thấy registry gốc:
+ca quét hụt (0/0 mà vá không chạy) vẫn phải hiện `[!]`, có test khoá riêng
+cho đúng ranh giới này.
 
 ---
 

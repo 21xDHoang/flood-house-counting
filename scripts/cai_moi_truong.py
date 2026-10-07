@@ -384,6 +384,12 @@ def xoa_cache_mmpretrain(modules=None, reg_mmengine=None):
                     "miếng vá coi như KHÔNG chạy.")
         dong.append("    Nếu ô sau báo AssertionError 'scope mmpretrain exists', "
                     "restart runtime rồi chạy lại từ ô cài đặt.")
+    if not xoa and so_rut == 0 and da_gap:
+        # Colab 08/10/2026: phiên mới toanh in ra "0 module / 0 registry" và
+        # người dùng phải hỏi lại xem thế là hỏng hay bình thường. Hai số 0
+        # KHÔNG nói lên gì cả — thêm một câu để lần sau không phải đoán.
+        dong.append("    (Kernel chưa từng nạp mmpretrain nên không có gì phải xoá — "
+                    "bình thường khi vừa mở runtime; miếng vá không có việc làm.)")
     if loi:
         dong.append("[!] Không đọc được `children` của: " + ", ".join(loi))
         dong.append("    Nếu ô sau báo AssertionError 'scope mmpretrain exists', "
