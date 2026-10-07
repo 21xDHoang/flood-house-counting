@@ -611,6 +611,41 @@ def chay_thu(cfg, so_vong, so_vong_khoi_dong=2):
 # main
 # ===========================================================================
 
+def va_torch_load_resume():
+    """Vá tương thích torch >= 2.6 cho đường RESUME (lỗi thật trên Colab).
+
+    Từ torch 2.6, `torch.load` mặc định `weights_only=True` và từ chối nạp mọi
+    lớp không nằm trong danh sách an toàn. Checkpoint của mmengine lưu cả
+    `message_hub` (lịch sử loss) nên bên trong có `HistoryBuffer` — và mmengine
+    0.10.7 gọi `torch.load(filename, map_location=...)` trần, không truyền
+    `weights_only`. Vì thế lần ĐẦU TIÊN đồ án thật sự resume (07/10/2026, ô
+    [3.10b] giai đoạn 2) nổ ngay lúc nạp checkpoint epoch 40:
+
+        _pickle.UnpicklingError: Weights only load failed ...
+        Unsupported global: GLOBAL mmengine.logging.history_buffer.HistoryBuffer
+
+    Trước đó chưa lần nào chạm vào đường này vì mọi lần chạy đều là work_dir
+    mới; còn [3.11] hễ Colab ngắt là phải resume, nên phải vá trước khi đốt
+    6 giờ GPU (số đo đầy đủ: docs/NOTES.md §3.13).
+
+    Vá bằng cách cho phép ĐÚNG lớp `HistoryBuffer` — đúng như chính thông báo
+    lỗi gợi ý — thay vì hạ `weights_only=False` cho mọi checkpoint: phần còn
+    lại của checkpoint vẫn được nạp ở chế độ an toàn. Torch cũ không có
+    `add_safe_globals` (khi đó mặc định đã là `weights_only=False`) thì không
+    có gì phải vá.
+
+    Trả về True nếu đã áp vá, để hàm gọi in một dòng log xác nhận.
+    """
+    import torch
+
+    if not hasattr(torch.serialization, "add_safe_globals"):
+        return False
+    from mmengine.logging.history_buffer import HistoryBuffer
+
+    torch.serialization.add_safe_globals([HistoryBuffer])
+    return True
+
+
 def main():
     in_utf8()
 
@@ -722,6 +757,9 @@ def main():
         return
 
     from mmengine.runner import Runner
+    if va_torch_load_resume():
+        print("  [vá] torch.load: đã cho phép HistoryBuffer — checkpoint mmengine "
+              "resume được (xem docs/NOTES.md §3.13).")
     print(f"\nBắt đầu train. Log và checkpoint ghi vào:\n    {cfg.work_dir}")
     if resume:
         print("Nếu work_dir đã có checkpoint, runner sẽ TỰ ĐỘNG resume từ bản mới "

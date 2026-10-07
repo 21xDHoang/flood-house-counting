@@ -938,16 +938,16 @@ Muốn giữ nhiều checkpoint hơn thì sửa `max_keep_ckpts` ở mục 8 c�
 | `test_mask_to_coco.py` | 106 |
 | `test_audit.py` | 103 |
 | `test_cai_moi_truong.py` | 59 |
-| `test_train.py` | **58** (49 trước §3.12, 47 trước §3.11) |
+| `test_train.py` | **63** (58 trước §3.13, 49 trước §3.12, 47 trước §3.11) |
 | `test_kiem_tra.py` | 41 |
 | `test_anchor.py` | 39 |
 | `test_overfit.py` | 37 |
 | `test_photometric.py` | 21 |
-| **Tổng** | **464** |
+| **Tổng** | **469** |
 
-Cả 8 bộ **PASS** ngày 01/10/2026, và chạy lại **PASS** ngày 07/10/2026 hai lần:
-sau khi thêm mục 5b của §3.12, và sau khi gia hạn `[3.10b]` lên 120 epoch (mục 5b
-khoá theo số mới — vẫn 464 phép kiểm). `test_train.py` chạy được cả trên máy sạch
+Cả 8 bộ **PASS** ngày 01/10/2026, và chạy lại **PASS** ngày 07/10/2026 ba lần:
+sau khi thêm mục 5b của §3.12, sau khi gia hạn `[3.10b]` lên 120 epoch, và sau
+khi vá resume của §3.13 (mục 1c — 469 phép kiểm). `test_train.py` chạy được cả trên máy sạch
 chưa cài MMDetection vì `scripts/train.py` chỉ import mmdet/mmengine **bên trong
 hàm** — đây là ràng buộc thiết kế có chủ ý, và có một phép kiểm khoá đúng điều đó
 (nếu ai đó chuyển các import lên đầu tệp, test sẽ đỏ ngay).
@@ -1126,6 +1126,10 @@ tiếp đúng epoch và đúng lịch LR; chỉ mất trạng thái AdamW (vài 
 resume "khởi động lại" quán tính — chấp nhận được, không đáng đánh đổi bằng việc
 ghi thêm ~600 MB optimizer lên Drive mỗi epoch). Muốn train lại từ đầu: xoá
 `runs/train/e1_cascade_convnext_t` trên Drive.
+
+⚠️ **Cập nhật 07/10/2026:** phần resume dưới đây nổ trên thực tế ở lần chạy thật
+đầu tiên — không phải vì logic mmengine sai (nó vẫn đúng), mà vì torch ≥ 2.6 đổi
+mặc định `weights_only` của `torch.load`. Đã vá và khoá bằng test; xem **§3.13**.
 
 ### 3.11 Lỗi thật thứ hai trên Colab: `{{_base_.ann_overfit}}` hỏng IM LẶNG (01/10/2026)
 
@@ -1325,6 +1329,58 @@ Thấy > 0,95 là dừng được — checkpoint epoch vừa xong đã ghi ra Dr
 đổi `max_epochs` 40 → 120 và mục 5b của test khoá theo số mới (vẫn **464** phép
 kiểm, cả 8 bộ PASS lại trên máy 07/10/2026).
 
+**Lần chạy thử ĐẦU của giai đoạn 2 (07/10/2026, 12:09) nổ ngay khi resume** —
+`_pickle.UnpicklingError` trên torch ≥ 2.6, chưa epoch nào chạy, checkpoint
+`epoch_40.pth` còn nguyên. Đây là lỗi thật thứ ba trên Colab; đã vá và khoá bằng
+test ở **§3.13**. Chạy lại ô `[3.10b]` sau khi pull code mới.
+
+### 3.13 Lỗi thật thứ ba trên Colab: resume nổ `_pickle.UnpicklingError` (torch ≥ 2.6, 07/10/2026)
+
+Lần ĐẦU TIÊN đồ án thật sự resume một checkpoint (ô `[3.10b]` giai đoạn 2, chạy
+tiếp từ epoch 40) thì nổ ngay lúc nạp, trước khi epoch 41 kịp bắt đầu:
+
+```
+_pickle.UnpicklingError: Weights only load failed ... Unsupported global:
+GLOBAL mmengine.logging.history_buffer.HistoryBuffer
+```
+
+Không mất gì: lỗi xảy ra ở bước ĐỌC, checkpoint `epoch_40.pth` còn nguyên. Log
+báo thẳng `Mã thoát: 1` — lỗi ồn ào, không phải loại im lặng.
+
+**Cơ chế.** Từ torch 2.6, `torch.load` mặc định `weights_only=True` và từ chối
+nạp mọi lớp không nằm trong danh sách an toàn. Checkpoint của mmengine lưu cả
+`message_hub` (lịch sử loss) — bên trong là các `HistoryBuffer` — còn mmengine
+0.10.7 gọi `torch.load(filename, map_location=...)` trần, không truyền
+`weights_only`. Hai thứ đó cộng lại thành: **mọi lần resume đều nổ**; còn nạp
+`load_from` / trọng số ImageNet thì không (checkpoint đó thuần tensor — thấy rõ
+trong log: bước nạp ImageNet chạy xong ngay trước đó).
+
+**Vì sao §3.10 không bắt được.** §3.10 là bản đọc source mmengine để trả lời
+"resume khôi phục được gì" — đúng về phía mmengine (nó có lưu `param_schedulers`),
+nhưng không thấy được thay đổi mặc định nằm ở **torch**, ngoài tầm đọc đó. Và vì
+mọi lần chạy trước ([3.10], `[3.10b]` giai đoạn 1) đều là `work_dir` mới, đường
+resume chưa từng được THỰC THI. Bài học lặp lại lần thứ ba: đọc code không thay
+được một lần chạy thật — và đây là lỗi đầu tiên thuộc loại "code của mình đúng
+nhưng môi trường đổi mặc định".
+
+**Vá** (`scripts/train.py`, hàm `va_torch_load_resume()`, gọi trong `main()`
+ngay trước `runner.train()`): cho phép ĐÚNG lớp `HistoryBuffer` bằng
+`torch.serialization.add_safe_globals([HistoryBuffer])` — đúng như chính thông
+báo lỗi gợi ý — thay vì hạ `weights_only=False` cho mọi checkpoint; phần còn
+lại của checkpoint vẫn được nạp ở chế độ an toàn. Torch cũ không có
+`add_safe_globals` (khi đó mặc định đã là `weights_only=False`) thì hàm tự bỏ
+qua, không cần vá. Lúc chạy, log in một dòng `[vá] torch.load: ...` để xác nhận
+vá đã sống.
+
+**Khoá bằng test** (mục 1c, **5 phép kiểm AST**, đã kiểm âm — bỏ lời gọi là test
+đỏ): hàm vá tồn tại; có guard `hasattr`; gọi đúng
+`add_safe_globals([HistoryBuffer])`; import `torch` / `HistoryBuffer` nằm TRONG
+hàm (giữ được tính "test trên máy sạch"); và quan trọng nhất — `main()` gọi hàm
+vá TRƯỚC `runner.train()`, vì resume xảy ra bên trong `train()`, gọi sau là đã
+quá muộn.
+
+**Số phép kiểm:** 464 → **469** (§3.5). Cả 8 bộ PASS trên máy 07/10/2026.
+
 ---
 
 ## 4. Việc tiếp theo
@@ -1394,14 +1450,23 @@ kiểm, cả 8 bộ PASS lại trên máy 07/10/2026).
      — vượt hẳn 0,618 của [3.10] và đuôi đường cong **vẫn leo** (hết epoch, không phải
      bão hoà); bước ngoặt nằm đúng ở mốc LR [30] (1e-3 → 1e-4). Recipe là thứ chặn,
      nhưng mốc 0,95 chưa đạt → GATE 3 vẫn chưa chốt. Số đo + cách đọc ở **§3.12**.
+   - **Lỗi thật thứ ba trên Colab (ô `[3.10b]` giai đoạn 2)**: lần resume thật đầu
+     tiên của đồ án nổ `_pickle.UnpicklingError` — torch ≥ 2.6 mặc định
+     `weights_only=True`, checkpoint mmengine chứa `HistoryBuffer` không nằm trong
+     danh sách an toàn. Chưa mất gì (lỗi ở bước đọc). Đã vá bằng
+     `add_safe_globals([HistoryBuffer])` trong `scripts/train.py`, khoá bằng 5 phép
+     kiểm AST (đã kiểm âm). Chi tiết ở **§3.13** — lỗi này cũng sẽ chặn resume của
+     `[3.11]` nếu không vá.
 6. **Bước kế tiếp ngay: chạy lại ô `[3.10b]` trên Colab cho giai đoạn 2** — chỉ gia
-   hạn 40 → 120 epoch, không đổi gì khác. `resume=True` tự nạp checkpoint epoch 40,
-   chạy tiếp 41..120 ở nguyên LR 1e-4 (~13 phút trên A100, ~50-60 phút trên T4).
-   Phải **push lên GitHub trước** — Colab clone code từ GitHub, chưa push là Colab
-   chạy đúng bản cũ (chạy lại mà chưa pull thì chỉ nạp checkpoint rồi thoát ngay).
-   Ô `[3.3b]` tự cài môi trường (gọi `scripts/cai_moi_truong.py`, §1.9) nên **không
-   phải mở notebook 00 ở tab thứ hai**. Đọc kết quả theo chốt ghi sẵn ở §3.12:
-   **mAP > 0,95 → GATE 3 ĐẠT**; bão hoà < 0,9 → trần thật, đào bằng AP từng lớp;
-   0,9–0,95 hoặc còn leo khi hết 120 → báo lại để quyết định cùng nhau.
+   hạn 40 → 120 epoch, không đổi gì khác; lần chạy trước đã vá xong lỗi resume
+   (§3.13). `resume=True` tự nạp checkpoint epoch 40, chạy tiếp 41..120 ở nguyên
+   LR 1e-4 (~13 phút trên A100, ~50-60 phút trên T4). Phải **push lên GitHub
+   trước** — Colab clone code từ GitHub, chưa push là Colab chạy đúng bản cũ (chạy
+   lại mà chưa pull thì chỉ nạp checkpoint rồi thoát ngay, hoặc nổ lại lỗi cũ nếu
+   bản cũ). Trong log phải thấy dòng `[vá] torch.load: ...` trước khi train bắt
+   đầu. Ô `[3.3b]` tự cài môi trường (gọi `scripts/cai_moi_truong.py`, §1.9) nên
+   **không phải mở notebook 00 ở tab thứ hai**. Đọc kết quả theo chốt ghi sẵn ở
+   §3.12: **mAP > 0,95 → GATE 3 ĐẠT**; bão hoà < 0,9 → trần thật, đào bằng AP từng
+   lớp; 0,9–0,95 hoặc còn leo khi hết 120 → báo lại để quyết định cùng nhau.
    Xong GATE 3 mới sang Phase 4.
    Không đụng tới `floodnet_raw.zip` 13 GB nữa — chỉ cần `floodnet_coco.zip` 1,86 GB.

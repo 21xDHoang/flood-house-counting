@@ -28,7 +28,10 @@ Bảy thứ test này phải khoá:
   5. `chay_thu` phải build optim_wrapper y như `Runner.train()` làm. mmengine
      chỉ build nó bên trong `train()`; vòng đo tự viết mà quên bước này thì
      `runner.optim_wrapper` vẫn là ConfigDict và `train_step` nổ ngay vòng đầu —
-     lỗi thật đã gặp trên Colab ở GATE 3, sau khi đã dựng xong model.
+     lỗi thật đã gặp trên Colab ở GATE 3, sau khi đã dựng xong model. Cùng nhóm
+     này: `main()` phải gọi `va_torch_load_resume()` TRƯỚC `runner.train()`,
+     nếu không thì resume nổ `_pickle.UnpicklingError` trên torch >= 2.6 —
+     lỗi thật thứ ba trên Colab (§3.13).
 
   6. Config con (`overfit20.py`) phải tự viết đường dẫn annotation của nó, và cả
      ba đường dẫn train/val/val_evaluator phải trỏ về CÙNG một tệp khớp
@@ -161,6 +164,78 @@ def main():
             kiem(bool(ts) and all(any(k.arg == "optim_wrapper"
                                       for k in n.keywords) for n in ts),
                  "moi loi goi train_step deu truyen keyword optim_wrapper")
+
+        print("\n=== 1c. va torch.load cho resume (loi that thu ba tren Colab) ===")
+        # Loi that 07/10/2026: lan DAU TIEN do an resume (o [3.10b] giai doan 2)
+        # no _pickle.UnpicklingError — torch >= 2.6 mac dinh weights_only=True,
+        # ma checkpoint mmengine chua HistoryBuffer (message_hub), lop khong nam
+        # trong danh sach an toan. Test nay khoa: xoa ham va / bo loi goi di la
+        # FAIL. Chi tiet: docs/NOTES.md §3.13.
+        ham_va = next((n for n in ast.walk(cay)
+                       if isinstance(n, ast.FunctionDef)
+                       and n.name == "va_torch_load_resume"), None)
+        kiem(ham_va is not None,
+             "tim thay ham va_torch_load_resume trong scripts/train.py")
+        if ham_va is not None:
+            # Guard hasattr(...): torch cu khong co add_safe_globals thi bo qua.
+            co_guard = [n for n in ast.walk(ham_va)
+                        if isinstance(n, ast.If)
+                        and any(isinstance(c, ast.Call)
+                                and isinstance(c.func, ast.Name)
+                                and c.func.id == "hasattr"
+                                and any(isinstance(a, ast.Constant)
+                                        and a.value == "add_safe_globals"
+                                        for a in c.args)
+                                for c in ast.walk(n.test))]
+            kiem(bool(co_guard),
+                 "co guard hasattr(torch.serialization, 'add_safe_globals')")
+
+            # Loi goi that: torch.serialization.add_safe_globals([HistoryBuffer])
+            goi_va = [n for n in ast.walk(ham_va)
+                      if isinstance(n, ast.Call)
+                      and isinstance(n.func, ast.Attribute)
+                      and n.func.attr == "add_safe_globals"
+                      and n.args
+                      and isinstance(n.args[0], ast.List)
+                      and any(isinstance(e, ast.Name)
+                              and e.id == "HistoryBuffer"
+                              for e in n.args[0].elts)]
+            kiem(bool(goi_va),
+                 "...goi add_safe_globals([HistoryBuffer]) — dung lop ma "
+                 "thong bao loi chi ten")
+
+            # Import torch / HistoryBuffer phai nam TRONG ham: de len dau tep
+            # la ca bo test nay khong chay noi o may sach.
+            import_trong_ham = {
+                "torch": any(isinstance(n, ast.Import)
+                             and any(a.name == "torch" for a in n.names)
+                             for n in ast.walk(ham_va)),
+                "history_buffer": any(
+                    isinstance(n, ast.ImportFrom)
+                    and n.module == "mmengine.logging.history_buffer"
+                    for n in ast.walk(ham_va)),
+            }
+            kiem(all(import_trong_ham.values()),
+                 f"import torch / HistoryBuffer nam trong ham, thuc te "
+                 f"{import_trong_ham!r}")
+
+        # Voi toi main(): loi goi va phai DUNG TRUOC runner.train() — resume
+        # xay ra ben trong train(), goi sau la da qua muon.
+        than_main = next((n for n in ast.walk(cay)
+                          if isinstance(n, ast.FunctionDef) and n.name == "main"),
+                         None)
+        if than_main is not None:
+            dong_va = [n.lineno for n in ast.walk(than_main)
+                       if isinstance(n, ast.Call)
+                       and isinstance(n.func, ast.Name)
+                       and n.func.id == "va_torch_load_resume"]
+            dong_train = [n.lineno for n in ast.walk(than_main)
+                          if isinstance(n, ast.Call)
+                          and isinstance(n.func, ast.Attribute)
+                          and n.func.attr == "train"]
+            kiem(bool(dong_va) and bool(dong_train)
+                 and min(dong_va) < min(dong_train),
+                 "main() goi va_torch_load_resume() TRUOC runner.train()")
 
         print("\n=== 2. cac_ann_can_co: tim dung tep annotation ===")
         # Duong dan tuong doi -> giai theo data_root cua CHINH dataset do

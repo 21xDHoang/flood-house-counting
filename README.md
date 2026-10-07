@@ -28,7 +28,7 @@ Số liệu và phát hiện đã kiểm chứng thật: [`docs/NOTES.md`](docs/
 | 0 | Khởi tạo repo + kiểm tra môi trường Colab | ✅ **GATE 0 đạt** — chạy thật trên Colab T4, đã kiểm chứng đủ (`docs/NOTES.md` §1.5–§1.6) |
 | 1 | Khám phá dữ liệu (EDA) & quyết định tiền xử lý | ✅ **GATE 1 đạt (30/09/2026)** — 4 tham số đã chốt (`docs/NOTES.md` §2.5) |
 | 2 | Chuyển mask → COCO & tiền xử lý offline | ✅ **GATE 2 đạt (30/09/2026)** — 2.343 ảnh, 6.301 box, đối chiếu Phase 1 khớp hoàn toàn (`docs/NOTES.md` §2.7) |
-| 3 | Cấu hình model & sanity check (overfit 20 ảnh) | 🟡 **GATE 3 chưa đạt (07/10/2026)** — `[3.6]`–`[3.9]` xong (số đo `--dry-run`: 866,3 ms/vòng, 10,4 phút/epoch, VRAM 7,81/14,56 GB). `[3.10]` chạy lại bằng bản sửa `{{_base_.}}`: chạy sạch đủ 60/60 epoch nhưng mAP dừng ở **0,618** (bão hoà). Ô `[3.10b]` (học vẹt, tắt tăng cường, LR ×10) giai đoạn 1 (40 epoch): mAP **0,742** (mAP50 0,905) và đuôi đường cong **vẫn leo** — recipe là thứ chặn, lỗi đường ống chưa đứng vững thêm một bậc, nhưng mốc 0,95 chưa đạt. Đang chạy giai đoạn 2 (gia hạn tới 120 epoch). Xem `docs/NOTES.md` §3.9, §3.11, §3.12 |
+| 3 | Cấu hình model & sanity check (overfit 20 ảnh) | 🟡 **GATE 3 chưa đạt (07/10/2026)** — `[3.6]`–`[3.9]` xong (số đo `--dry-run`: 866,3 ms/vòng, 10,4 phút/epoch, VRAM 7,81/14,56 GB). `[3.10]` chạy lại bằng bản sửa `{{_base_.}}`: chạy sạch đủ 60/60 epoch nhưng mAP dừng ở **0,618** (bão hoà). Ô `[3.10b]` (học vẹt, tắt tăng cường, LR ×10) giai đoạn 1 (40 epoch): mAP **0,742** (mAP50 0,905) và đuôi đường cong **vẫn leo** — recipe là thứ chặn, lỗi đường ống chưa đứng vững thêm một bậc, nhưng mốc 0,95 chưa đạt. Giai đoạn 2 (gia hạn tới 120 epoch) đang chạy lại sau khi vá **lỗi thật thứ ba trên Colab** — resume nổ `_pickle.UnpicklingError` trên torch ≥ 2.6, đã vá bằng `add_safe_globals([HistoryBuffer])` trong `scripts/train.py`. Xem `docs/NOTES.md` §3.9, §3.11, §3.12, §3.13 |
 | 4 | Huấn luyện baseline (E1) | ⏳ |
 | 5 | Đánh giá mAP + sai số đếm & phân tích lỗi | ⏳ |
 | 6 | Thí nghiệm cải thiện & ablation (E2–E7) | ⏳ |
@@ -158,7 +158,7 @@ Mở `notebooks/03_train.ipynb` và chạy từ trên xuống:
 **Dừng sau ô `[3.10]` (hoặc `[3.10b]` nếu `[3.10]` chưa đạt) và báo cáo lại.** Ô
 `[3.10b]` chỉ chạy khi `[3.10]` chưa đạt mốc 0,9 — kết quả đọc theo chốt ghi sẵn ở
 `docs/NOTES.md` §3.12. Giai đoạn 1 (40 epoch) chạy 07/10/2026 dừng ở 0,742 còn leo;
-chạy lại chính ô đó (sau `git pull`) để `resume` chạy tiếp giai đoạn 2 tới 120 epoch.
+chạy lại chính ô đó (sau `git pull`) để `resume` chạy tiếp giai đoạn 2 tới 120 epoch — lần resume đầu tiên từng nổ trên torch ≥ 2.6, đã vá ở `scripts/train.py` (`docs/NOTES.md` §3.13); log phải in dòng `[vá] torch.load: ...` trước khi train bắt đầu.
 Ô `[3.11]` là Phase 4, chỉ
 chạy sau khi chốt GATE 3 — 24 epoch trong config hiện tại là **mặc định tạm**.
 
@@ -186,7 +186,7 @@ chứng minh điều gì.
 | `src/floodcount/infer/` | `predict.py` (ảnh → box + số đếm), `tta_wbf.py` |
 | `scripts/` | Lệnh CLI mỏng gọi vào `src/`; `cai_moi_truong.py` — cài + vá môi trường Colab, dùng chung cho notebook 00 và 03 |
 | `notebooks/` | Notebook **mỏng** cho Colab — chỉ gọi script, không chứa logic |
-| `tests/` | **464 phép kiểm** trong 8 bộ test, chạy trên máy CPU — không cần GPU, không cần dataset thật (dùng zip giả có cả bẫy ColorMasks). `test_train.py` kiểm được cả trên máy **chưa cài MMDetection**, vì `scripts/train.py` chỉ import mmdet/mmengine bên trong hàm (và khoá luôn thứ tự build `optim_wrapper` của vòng đo `--dry-run` — lỗi thật đã gặp, §3.8 NOTES); `test_cai_moi_truong.py` khoá cách dò wheel `mmcv` và ba miếng vá môi trường |
+| `tests/` | **469 phép kiểm** trong 8 bộ test, chạy trên máy CPU — không cần GPU, không cần dataset thật (dùng zip giả có cả bẫy ColorMasks). `test_train.py` kiểm được cả trên máy **chưa cài MMDetection**, vì `scripts/train.py` chỉ import mmdet/mmengine bên trong hàm (và khoá luôn thứ tự build `optim_wrapper` của vòng đo `--dry-run` — lỗi thật đã gặp, §3.8 NOTES); `test_cai_moi_truong.py` khoá cách dò wheel `mmcv` và ba miếng vá môi trường |
 | `outputs/` | Ảnh minh hoạ, overlay, biểu đồ (không đưa lên git) |
 | `requirements-colab.txt` | Bản ghi các gói cài thêm vào Colab (đọc phần đầu file trước khi dùng) |
 
