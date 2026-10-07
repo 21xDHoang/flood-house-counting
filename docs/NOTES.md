@@ -945,8 +945,9 @@ Muốn giữ nhiều checkpoint hơn thì sửa `max_keep_ckpts` ở mục 8 c�
 | `test_photometric.py` | 21 |
 | **Tổng** | **464** |
 
-Cả 8 bộ **PASS** ngày 01/10/2026, và chạy lại **PASS** ngày 07/10/2026 sau khi
-thêm mục 5b của §3.12. `test_train.py` chạy được cả trên máy sạch
+Cả 8 bộ **PASS** ngày 01/10/2026, và chạy lại **PASS** ngày 07/10/2026 hai lần:
+sau khi thêm mục 5b của §3.12, và sau khi gia hạn `[3.10b]` lên 120 epoch (mục 5b
+khoá theo số mới — vẫn 464 phép kiểm). `test_train.py` chạy được cả trên máy sạch
 chưa cài MMDetection vì `scripts/train.py` chỉ import mmdet/mmengine **bên trong
 hàm** — đây là ràng buộc thiết kế có chủ ý, và có một phép kiểm khoá đúng điều đó
 (nếu ai đó chuyển các import lên đầu tệp, test sẽ đỏ ngay).
@@ -1272,6 +1273,58 @@ lỗi im lặng mà §3.11 vừa dạy.
 
 **Số phép kiểm:** 455 → 464 (§3.5). Cả 8 bộ PASS trên máy ngày 07/10/2026.
 
+**Chạy [3.10b] cùng ngày — giai đoạn 1 (40 epoch): recipe bị buộc tội, mốc chưa
+đạt.** Chạy sạch 40/40 epoch trên A100 (thoát 0, **6 phút 23 giây**, 11:52:05 →
+11:58:28), tiền kiểm ĐẠT HẾT (đúng 20 ảnh / 125 box, `classwise` in AP từng
+lớp), cùng lượng cảnh báo "out of bounds" như [3.10] (80 dòng, vẫn chỉ ở bước
+vẽ). `base_lr` đo từ log: epoch 1–30 chạy **1e-3**, epoch 31–40 chạy **1e-4** —
+lịch thiết kế sống đúng.
+
+| Epoch | mAP | ghi chú |
+|---|---|---|
+| 25–30 | 0,35–0,47 | 30 epoch ở 1e-3 chỉ loanh quanh ~0,4 |
+| 31 | 0,523 | vừa hạ xuống 1e-4 — nhảy ngay |
+| 32–36 | 0,625 → 0,669 | |
+| 37–40 | 0,722 / 0,736 / **0,744** / 0,742 | 10 epoch ở 1e-4 leo +0,37 |
+
+Chốt epoch 40: mAP **0,742** / mAP50 0,905 / mAP75 0,898 (small 0,580 — medium
+0,748 — large 0,801), AR 0,833. AP từng lớp: **flooded_building 0,812** (mAP50
+0,961), **non_flooded_building 0,673** (mAP50 0,848). Loss epoch cuối:
+`loss_rpn_cls` 0,0034 (so 0,0152 của [3.10]), acc ba stage 96,8 / 96,6 / 96,3
+(so 94,5 / 91,9 / 93,1) — chặt hơn hẳn.
+
+**Đọc giai đoạn 1** — nghi phạm recipe được xác nhận, "lỗi thật" bị loại thêm
+một bậc, nhưng mốc 0,95 chưa đạt nên **GATE 3 vẫn chưa chốt**:
+
+- So trực tiếp với [3.10] (cùng dữ liệu, cùng phép đo — chỉ recipe đổi):
+  0,618-bão-hoà-sau-60-epoch → **0,742-còn-leo-sau-40-epoch**. Cùng 20 ảnh đó,
+  chỉ đổi tăng cường + lịch LR mà mAP +0,124 và tốc độ leo cuối gần gấp 5. Kiểu
+  hỏng "nhãn / box / eval sai" càng khó đứng vững.
+- Bước ngoặt nằm ĐÚNG ở mốc [30]: 10 epoch ở 1e-4 leo +0,37 trong khi 30 epoch
+  ở 1e-3 chỉ loanh quanh 0,4. Nửa "LR ×10" của phép chẩn đoán hoá ra **phản tác
+  dụng** — LR chạy được là **1e-4, đúng base_lr của config chính** (tin tốt cho
+  Phase 4). Nửa "tắt tăng cường" không tách được ở lần này (cố ý đổi cùng lúc).
+- KHÔNG rơi vào nhánh "~0,6x và bão hoà → lỗi thật": đuôi đường cong vẫn leo
+  (+0,02 trong 4 epoch cuối, so +0,005/5 epoch của [3.10]) — lần này **hết
+  epoch**, không phải bão hoà. Cũng KHÔNG đạt nhánh "> 0,95". Số đo per-class để
+  lại manh mối nếu phải đào tiếp: non_flooded thua flooded 0,14.
+
+**Giai đoạn 2 — chốt trước khi chạy: gia hạn 40 → 120 epoch, không đổi gì khác.**
+Chạy lại đúng ô [3.10b]; `resume=True` tự nạp checkpoint epoch 40 và chạy tiếp
+41..120 ở nguyên `base_lr` 1e-4 (mốc [30] đã qua — dù lịch được nạp từ checkpoint
+hay dựng lại từ config thì cũng vậy). Xác nhận trong log 2–3 epoch đầu:
+`base_lr: 1.0000e-04` và mAP epoch 41 ~0,7x, KHÔNG phải ~0 (thấy ~0 là resume
+hỏng, dừng báo ngay). Chốt đọc:
+
+- **mAP > 0,95** → GATE 3 ĐẠT, bàn tiếp LR + số epoch cho train thật.
+- **Bão hoà < 0,9** (10 epoch liền nhích < 0,01) → trần thật, không phải thiếu
+  epoch; đào tiếp bằng AP từng lớp + ảnh `vis_data`.
+- **0,9–0,95, hoặc hết 120 epoch mà còn leo** → gửi số liệu, quyết định cùng nhau.
+
+Thấy > 0,95 là dừng được — checkpoint epoch vừa xong đã ghi ra Drive. Config đã
+đổi `max_epochs` 40 → 120 và mục 5b của test khoá theo số mới (vẫn **464** phép
+kiểm, cả 8 bộ PASS lại trên máy 07/10/2026).
+
 ---
 
 ## 4. Việc tiếp theo
@@ -1337,12 +1390,18 @@ lỗi im lặng mà §3.11 vừa dạy.
      `overfit20.py` đặt ra, đuôi đường cong bão hoà → **GATE 3 chưa đạt**. Nghi phạm
      thuộc recipe (tăng cường + lịch LR bóp trong 600 vòng), không phải lỗi đã chứng
      minh. Số đo đầy đủ và phép thử phân biệt ở **§3.12**.
-6. **Bước kế tiếp ngay: chạy ô `[3.10b]` của `notebooks/03_train.ipynb` trên Colab.**
-   Đây là phép thử phân biệt của §3.12: học vẹt 20 ảnh với điều kiện dễ nhất (tắt
-   tăng cường, LR ×10, 40 epoch). Phải **push lên GitHub trước** — Colab clone code
-   từ GitHub, chưa push là Colab chạy đúng bản cũ. Ô `[3.3b]` tự cài môi trường (gọi
-   `scripts/cai_moi_truong.py`, §1.9) nên **không phải mở notebook 00 ở tab thứ hai**.
-   Đọc kết quả theo chốt ghi sẵn ở §3.12: **mAP > 0,95 → GATE 3 ĐẠT**; vẫn ~0,6x và
-   bão hoà → lỗi thật trong nhãn/box/loss/eval, đào tiếp bằng AP từng lớp trong log.
+   - **`[3.10b]` giai đoạn 1 ngày 07/10/2026 (40 epoch)**: mAP **0,742** (mAP50 0,905)
+     — vượt hẳn 0,618 của [3.10] và đuôi đường cong **vẫn leo** (hết epoch, không phải
+     bão hoà); bước ngoặt nằm đúng ở mốc LR [30] (1e-3 → 1e-4). Recipe là thứ chặn,
+     nhưng mốc 0,95 chưa đạt → GATE 3 vẫn chưa chốt. Số đo + cách đọc ở **§3.12**.
+6. **Bước kế tiếp ngay: chạy lại ô `[3.10b]` trên Colab cho giai đoạn 2** — chỉ gia
+   hạn 40 → 120 epoch, không đổi gì khác. `resume=True` tự nạp checkpoint epoch 40,
+   chạy tiếp 41..120 ở nguyên LR 1e-4 (~13 phút trên A100, ~50-60 phút trên T4).
+   Phải **push lên GitHub trước** — Colab clone code từ GitHub, chưa push là Colab
+   chạy đúng bản cũ (chạy lại mà chưa pull thì chỉ nạp checkpoint rồi thoát ngay).
+   Ô `[3.3b]` tự cài môi trường (gọi `scripts/cai_moi_truong.py`, §1.9) nên **không
+   phải mở notebook 00 ở tab thứ hai**. Đọc kết quả theo chốt ghi sẵn ở §3.12:
+   **mAP > 0,95 → GATE 3 ĐẠT**; bão hoà < 0,9 → trần thật, đào bằng AP từng lớp;
+   0,9–0,95 hoặc còn leo khi hết 120 → báo lại để quyết định cùng nhau.
    Xong GATE 3 mới sang Phase 4.
    Không đụng tới `floodnet_raw.zip` 13 GB nữa — chỉ cần `floodnet_coco.zip` 1,86 GB.

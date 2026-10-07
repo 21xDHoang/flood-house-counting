@@ -380,10 +380,12 @@ def main():
         # Tep nay ton tai chi de tra loi MOT cau hoi: khi [3.10] chay het 60 epoch
         # ma mAP chi dung o 0,618 (docs/NOTES.md §3.12), loi nam o duong ong
         # (nhan/box/loss/eval) hay o recipe (LR/tang cuong)? Cach tra loi: chay
-        # LAI dung phep thu hoc vet nhung voi dieu kien de nhat. Toan bo gia tri
-        # cua lan chay nam o hai dong ghi de — tat tang cuong va LR x10 — nen
-        # chung phai duoc khoa lai: "don dep" config roi chay nham mot lan khac
-        # thi phep chan doan mat gia tri ma khong co gi bao.
+        # LAI dung phep thu hoc vet nhung voi dieu kien de nhat. Giai doan 1 da
+        # chay 07/10/2026: 0,742 va con leo — recipe la thu chan, nhung chua du
+        # moc; giai doan 2 gia han 40 -> 120 epoch, khong doi gi khac. Toan bo
+        # gia tri cua lan chay nam o hai dong ghi de — tat tang cuong va LR x10 —
+        # nen chung phai duoc khoa lai: "don dep" config roi chay nham mot lan
+        # khac thi phep chan doan mat gia tri ma khong co gi bao.
         duong_hv = os.path.join(str(GOC_REPO), "configs", "mmdet",
                                 "overfit20_hocvet.py")
         kiem(os.path.exists(duong_hv),
@@ -444,9 +446,11 @@ def main():
             if isinstance(sch, dict) and sch.get("type") == "MultiStepLR":
                 moc_hv = sch.get("milestones")
         so_epoch_hv = _doc_bien(duong_hv, "max_epochs")
-        kiem(moc_hv == [30] and so_epoch_hv == 40,
-             f"lich: MOT moc giam LR [30] tren 40 epoch (moc cuoi phai nam trong "
-             f"pham vi), thuc te moc {moc_hv!r} tren {so_epoch_hv!r} epoch")
+        kiem(moc_hv == [30] and so_epoch_hv == 120,
+             f"lich: MOT moc giam LR [30] tren 120 epoch (moc cuoi phai nam "
+             f"trong pham vi; giai doan 1 chay 40 epoch, giai doan 2 resume chay "
+             f"tiep toi 120 — xem NOTES §3.12), thuc te moc {moc_hv!r} tren "
+             f"{so_epoch_hv!r} epoch")
 
         # classwise=True: log lan nay in AP theo TUNG LOP — de phan biet "mot lop
         # hong" voi "hoc chung chung khong len".

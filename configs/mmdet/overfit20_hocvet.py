@@ -35,8 +35,38 @@
 # ĐƯỢC không", không phải "yếu tố nào đang chặn". Tách riêng từng biến là việc
 # của Phase 4 (chọn recipe cho train thật), không phải việc của GATE.
 #
-# Chạy hết 40 epoch: khoảng 6-10 phút trên A100, 20-30 phút trên T4. Có thể dừng
-# sớm khi log đã cho thấy mAP > 0,95.
+# ---------------------------------------------------------------------------
+# GIAI ĐOẠN 1 (07/10/2026, 40 epoch) ĐÃ CHẠY — vì sao có GIAI ĐOẠN 2
+# ---------------------------------------------------------------------------
+# Chạy sạch 40/40 epoch trên A100 (thoát 0, ~6 phút rưỡi), tiền kiểm ĐẠT HẾT.
+# mAP cuối 0,742 (mAP50 0,905); AP từng lớp: flooded 0,812 / non_flooded 0,673.
+# Hai điều đo được từ log:
+#   - Bước ngoặt nằm ĐÚNG ở mốc [30]: 30 epoch ở 1e-3 chỉ loanh quanh ~0,4;
+#     vừa hạ xuống 1e-4 thì 10 epoch leo +0,37 (0,369 -> 0,742). Hoá ra nửa
+#     "LR ×10" của phép chẩn đoán phản tác dụng — LR chạy được là 1e-4, đúng
+#     base_lr của config chính. Nửa "tắt tăng cường" không tách được ở lần này
+#     (cố ý), nhưng đối chiếu với [3.10] là đủ thấy recipe — không phải nhãn /
+#     box / loss / eval — mới là thứ đang chặn.
+#   - Đuôi đường cong VẪN LEO (+0,02 trong 4 epoch cuối, so với +0,005/5 epoch
+#     của [3.10]) — lần này HẾT EPOCH, không phải BÃO HOÀ. Vì vậy chưa được
+#     phép kết luận "trần thật", mà cũng chưa đủ mốc để kết luận ĐẠT.
+#
+# GIAI ĐOẠN 2 chỉ đổi MỘT thứ: gia hạn 40 -> 120 epoch (max_epochs dưới đây).
+# Chạy lại đúng ô [3.10b]: `resume=True` tự nạp checkpoint epoch 40 và chạy
+# tiếp 41..120, giữ nguyên base_lr 1e-4 (mốc [30] đã qua — dù lịch được nạp
+# từ checkpoint hay dựng lại từ config thì cũng vậy). Xác nhận trong log 2-3
+# epoch đầu: `base_lr: 1.0000e-04` và mAP ~0,7x, KHÔNG phải ~0 (thấy ~0 là
+# resume hỏng, dừng báo ngay).
+#
+# Chốt đọc giai đoạn 2 (giữ nguyên tinh thần chốt trước, không dịch mốc):
+#   - mAP > 0,95  -> GATE 3 ĐẠT, bàn tiếp LR + số epoch cho train thật.
+#   - bão hoà < 0,9 (10 epoch liền nhích < 0,01) -> trần thật; đào tiếp bằng
+#     AP từng lớp (non_flooded đang thua flooded 0,14) + ảnh vis_data.
+#   - 0,9-0,95, hoặc hết 120 epoch mà còn leo -> gửi số liệu, quyết định cùng.
+# Thấy > 0,95 là DỪNG ĐƯỢC: checkpoint epoch vừa xong đã ghi ra Drive rồi.
+#
+# Thời lượng: giai đoạn 1 (40 epoch) mất ~6-7 phút trên A100; giai đoạn 2
+# (thêm 80 epoch) ~13 phút trên A100, ~50-60 phút trên T4.
 #
 # ⚠️ Vẫn là điểm trên tập TRAIN. Tuyệt đối không trích dẫn mAP của tệp này vào
 # báo cáo như một kết quả của đồ án (xem đầu tệp overfit20.py).
@@ -76,13 +106,13 @@ train_dataloader = dict(
 # chỉ recipe train đổi, phép đo không đổi.
 
 # ---------------------------------------------------------------------------
-# 2. Lịch train: 40 epoch, LR chỉ giảm MỘT lần ở epoch 30
+# 2. Lịch train: LR chỉ giảm MỘT lần ở epoch 30 (40 -> 120 epoch ở giai đoạn 2)
 # ---------------------------------------------------------------------------
-# 40 epoch × 10 vòng = 400 vòng lặp, LR 1e-3 suốt 300 vòng đầu. So với [3.10]
-# (LR 1e-4, bị bóp còn 1e-5/1e-6 ở 20/5 epoch cuối): nhiều hơn ~về số bước ở
-# LR đủ lớn. Warmup 50 vòng của overfit20.py (5 epoch đầu) giữ nguyên — LR 1e-3
-# ngay từ vòng đầu dễ làm hỏng backbone vừa nạp trọng số ImageNet.
-max_epochs = 40
+# Giai đoạn 1 (đã chạy, 40 epoch): 300 vòng đầu ở 1e-3, 100 vòng cuối ở 1e-4.
+# Giai đoạn 2 (chạy tiếp bằng resume): 800 vòng ở 1e-4. Warmup 50 vòng của
+# overfit20.py (5 epoch đầu) giữ nguyên — LR 1e-3 ngay từ vòng đầu dễ làm hỏng
+# backbone vừa nạp trọng số ImageNet.
+max_epochs = 120
 train_cfg = dict(max_epochs=max_epochs)
 
 param_scheduler = [
