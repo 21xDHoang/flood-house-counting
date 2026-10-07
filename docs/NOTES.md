@@ -1830,6 +1830,16 @@ print("OK", mmpretrain.__version__)
 rồi chạy lại ô `[3.4]`. Đường chắc chắn hơn: restart runtime rồi chạy lại từ ô
 `[3.3]` (môi trường nằm ở `/content` nên phải cài lại, trừ khi còn tệp đánh dấu).
 
+**Xác nhận trên Colab (08/10/2026):** dán đúng miếng vá trên vào kernel đang
+nhiễm → `import mmpretrain` in `OK 1.2.0`, rồi chạy lại ô `[3.4]` báo `Sẵn sàng.`
+với đủ 6 gói (torch 2.11.0+cu130, mmcv 2.2.0, mmengine 0.10.7, mmdet 3.3.0,
+mmpretrain 1.2.0). Đúng như chẩn đoán: con registry cũ là thứ duy nhất chặn.
+Hai ghi chú từ lần chạy này: (1) `pycocotools : ?` là bình thường — gói không
+khai báo `__version__`; ô `[3.4]` đã sửa để in rõ "đã cài (không khai báo
+__version__)" thay vì dấu `?` trông như lỗi; (2) đường TỰ ĐỘNG (ô `[3.3b]` bản
+mới) chưa chạy lại trong phiên đang nhiễm đó — phiên đó gỡ bằng miếng vá dán
+tay, còn `[3.3b]` bản mới sẽ được dùng ở phiên Colab kế tiếp.
+
 ---
 
 ## 4. Việc tiếp theo
